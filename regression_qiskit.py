@@ -20,7 +20,7 @@ from qiskit.compiler import transpile
 from qiskit_aer import AerSimulator
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 from qiskit_ibm_runtime import Session, SamplerV2 as Sampler
-# from qiskit_ibm_runtime import QiskitRuntimeService, Estimator, Session
+from qiskit_ibm_runtime import EstimatorV2 as Estimator
 from qiskit_ibm_runtime.options import ExecutionOptions, Options
 from qiskit.quantum_info import DensityMatrix,partial_trace, SparsePauliOp
 
@@ -115,97 +115,45 @@ def createU_m(phi_m: float, m_index: int):
     m_projector.shape = (2 ** N_M, 1)
     m_projector = sparse.csc_matrix(m_projector)
     m_projector = m_projector.dot(m_projector.transpose())
-
-    U = expm(1j * phi_m * sparse.kron(Z, sparse.kron(I, m_projector)))
+    U = expm(1j * phi_m * sparse.kron(I, sparse.kron(m_projector, Z)))
     return U
 
 
 #The measurement operator
-def createM_hats():
+def create_x_index_list():
     global N_M
-    M_hats = []
     x_index_list = []
 
     for i in range(1, 2 ** N_M):
         binary_string = ("{:0{width}b}".format(i, width=N_M))[::-1]
-        qc = QuantumCircuit(N_M)
         indices = [i for i, x in enumerate(binary_string) if x == '1']
-        qc.h(indices)
         x_index_list.append(indices)
-        M_hats.append(qc.to_gate())
-    return M_hats, x_index_list
+    return x_index_list
 
-#This is used for crafting the circuit. Also implements the saving and loading of larger unitaries as
-#sparse matric .npz format
-def initCircuit(circ, phi, estimated, qpu, ar, cr0, cr1):
-    # global QPU_len
-    # global precision
-    # global N_L
-    # global N_M
-    # load = False
-
-    psi = circ
-    # directory = f"N_L={N_L},N_M={N_M},precision=no-digitalization"
-    # if not os.path.exists(directory):
-    #     os.mkdir(directory)
-    # else:
-    #     load = True
-
-    # for i in range(len(estimated)):
-    #     sparse_U_k = sparse.load_npz(f"./{directory}/U_k_{i}.npz") if load else createU_k(i, estimated[i])
-    #     if not load: sparse.save_npz(f"./{directory}/U_k_{i}.npz", sparse_U_k)
-    # sparse_U_k = [createU_k(i, estimated[i]) for i in range(len(estimated))]
-    # sparse_U_k_product = reduce(lambda operator, product: operator.multiply(product), sparse_U_k)
-    # U_k = Operator(sparse_U_k_product.toarray())
-    # psi.append(U_k, [x for x in range(1 + QPU_len)])
-
-    # psi.measure(ar[0], cr[0])
-    # psi.reset(ar[0])
-    # for j in range(l):
-    #     for i in range(m):
-    #         estimated[j * m + i] = estimated[j * m + i] * math.cos(phi[i % m])
-
-
-    circ.prepare_state(estimated, qpu)
-    psi.h(ar[0])
-
-    # sparse_U_m = [createU_m(phi[i], i) for i in range(2 ** N_M)]
-    # sparse_U_m_product = reduce(lambda operator, product: operator.multiply(product), sparse_U_m)
-    for i in range(2 ** N_M):
-        phi_value = phi[i]
-        sparse_U_m = createU_m(phi_value, i)
-        U_m = Operator(sparse_U_m.toarray())
-        psi.append(U_m, [x for x in range(1 + QPU_len)])
-
-    psi.measure(ar[0], cr1[0])
-    psi.reset(ar[0])
-    # psi.h(ar[0])
-    # psi.measure([x for x in range(1 + QPU_len, 1 + QPU_len + precision)], 0)
-    return psi
 
 def cut_counts(counts, bit_indexes):
-    global N_L
-
     bit_indexes.sort(reverse=True) 
     new_counts = {}
+
     for key in counts:
         # if(key[-1] == '1' and key[-2] == '0'):
-        sliced_key = key[:-N_L]
-        new_key = ''
-        for index in bit_indexes:
-            new_key += sliced_key[-1 - index]
-        if new_key in new_counts:
-            new_counts[new_key] += counts[key]
-        else:
-            new_counts[new_key] = counts[key]
-
+        if(key[-1] == '0'):
+            # print(key)
+            new_key = ''
+            for index in bit_indexes:
+                new_key += key[-2 - index]
+            if new_key in new_counts:
+                new_counts[new_key] += counts[key]
+            else:
+                new_counts[new_key] = counts[key]
+    # print(counts)
+    # print(new_counts)
     return new_counts
 
 def post_select(counts, x_index_list):
 
     x_counts = cut_counts(counts, x_index_list)
     expval = 0
-
     for key, value in zip(x_counts.keys(), x_counts.values()):
         if(key.count('1') % 2 == 0):
             expval += value
@@ -235,11 +183,16 @@ m = len(X[0]) + 1 #Columns (including label)
 N_M = int(np.ceil(np.log2(m))) #Binary length for column items
 N_L = int(np.ceil(np.log2(l))) #Binary length for row items
 
+QPU_len = N_M + N_L
 
 data = np.empty((l, m))
 
 for i in range(l):
-    data[i] = np.flip(np.append(X[i], y[i])) #Reverse the data order
+    # print(data[i])
+    data[i] = np.append(y[i], X[i]) #Reverse the data order
+    # print(data[i])
+    # exit()
+
 
 squareSum = 0
 data = data.transpose()
@@ -261,9 +214,13 @@ for i in range(l):
 
 data = dataPadded.flatten()
 
+data_copy = np.copy(data)
+for j in range(2 ** QPU_len):
+    reversed_index = int(("{:0{width}b}".format(j, width=QPU_len))[::-1], 2)
+    data[reversed_index] = data_copy[j]
+
 epsilon = 10**-15
-QPU_len = N_M + N_L
-shots = 2 ** 16
+shots = 2 ** 17
 
 print(QPU_len)
 
@@ -271,84 +228,104 @@ print(QPU_len)
 sparse_U_k = [createU_k(i, data[i]) for i in range(len(data))]
 sparse_U_k_product = reduce(lambda operator, product: operator.multiply(product), sparse_U_k)
 # M_hat = Operator(createM_hat().toarray())
-M_hats, x_index_list = createM_hats()
+x_index_list = create_x_index_list()
 
 #Function for NM optimizer
-def run_circuit(phi, M_hat):
+def run_circuit(phi):
 
-    # ar = AncillaRegister(1, 'ancilla')
-    qpu = QuantumRegister(QPU_len, 'qpu')
-    # cr = ClassicalRegister(QPU_len + 2, 'cr')
+    ar = AncillaRegister(1, 'ancilla')
+    row_reg = QuantumRegister(N_L, 'l')
+    col_reg = QuantumRegister(N_M, 'm')
+    cr = ClassicalRegister(N_M + 1, 'cr')
 
     # psi = QuantumCircuit(ar, qpu, cr)
-    psi = QuantumCircuit(qpu)
+    psi = QuantumCircuit(ar, row_reg, col_reg,  cr)
 
 
-    estimated = np.copy(data)
-    squareSum = 0
+    # estimated = np.copy(data)
+    # squareSum = 0
+    # # phi = phi[::-1]
+    # for j in range(2 ** N_L):
+    #     for i in range(2 ** N_M):
+    #         index = j * 2 ** N_M + i
+    #         reversed_index = int(("{:0{width}b}".format(index, width=QPU_len))[::-1], 2)
+    #         estimated[reversed_index] = estimated[reversed_index]
+    #         squareSum += np.square(estimated[reversed_index])
 
-    for j in range(2 ** N_L):
-        for i in range(2 ** N_M):
-            estimated[j * 2 ** N_M + i] = estimated[j * 2 ** N_M + i] * phi[i]
-            squareSum += np.square(estimated[j * 2 ** N_M + i])
+    # squareSum = np.sqrt(squareSum)
+    # estimated = estimated / squareSum
 
-    squareSum = np.sqrt(squareSum)
-    estimated = estimated / squareSum
-
-    psi.initialize(estimated)
-    # sparse_U_m = [createU_m(phi[i], i) for i in range(2 ** N_M)]
+    psi.initialize(data, [row_reg, col_reg])
+    # ordering1 = [0, 3, 2, 1]
+    # ordering2 = [0, 1, 2, 3]
+    sparse_U_m = [createU_m(phi[i], i) for i in range(2 ** N_M)]
     # sparse_U_m_product = reduce(lambda operator, product: operator.multiply(product), sparse_U_m)
 
-    # psi.h(ar)
-    # psi.h(qpu)
+    # psi.h([x for x in range(QPU_len + 1)])
 
     # for U in sparse_U_k:
     #     psi.append(Operator(U.toarray()), [x for x in range(1 + QPU_len)])
 
-    # # psi.append(Operator(sparse_U_k_product.toarray()), [x for x in range(1 + QPU_len)])
+    # # # psi.append(Operator(sparse_U_k_product.toarray()), [x for x in range(1 + QPU_len)])
     # psi.h(ar)
     # psi.measure(ar, cr[0])
     # psi.x(ar)
-    # psi.h(ar)
-    # for U in sparse_U_m:
-    #     psi.append(Operator(U.toarray()), [x for x in range(1 + QPU_len)])
+    psi.h(ar)
+    for U in sparse_U_m:
+        psi.append(Operator(U.toarray()), [x for x in range(1 + QPU_len)])
     # # psi.append(Operator(sparse_U_m_product.toarray()), [x for x in range(1 + QPU_len)])
-    # psi.h(ar)
-    # psi.measure(ar, cr[1])
+    psi.h(ar)
+    psi.measure(ar, cr[0])
 
-    psi.append(M_hat, [x for x in range(N_L, QPU_len)])
-    
-    # for i in range(1, 1 + QPU_len):
-    #     psi.measure(i, cr[i + 1])
-    psi.measure_all()
+    psi.h(col_reg)
 
+    # hamiltonian = SparsePauliOp(['IIIII', 'IXIII', 'XIIII', 'XXIII'])
+    for i in range(N_M):
+        psi.measure(col_reg[i], cr[i + 1])
+    # psi.measure_all()
+
+    # print(psi)
     aer_sim = AerSimulator()
     pm = generate_preset_pass_manager(backend=aer_sim, optimization_level=1)
     isa_qc = pm.run(psi)
-    # print(isa_qc)
+    # isa_observables = hamiltonian.apply_layout(isa_qc.layout)
+
+    # estimator = Estimator(backend=aer_sim, options={"default_precision": 0.005})
+    # job = estimator.run([(isa_qc, isa_observables)])
+    # pub_result = job.result()[0]
+    # print(phi)
+    # print(f"Expectation values: {pub_result.data.evs / math.pow(math.cos(phi[0]), 2)}")
+    # exit()
+    # return pub_result.data.evs / math.pow(math.cos(phi[0]), 2)
+    # exit()
+    # # print(isa_qc)
     with Session(backend=aer_sim) as session:
         sampler = Sampler(session=session)
         result = sampler.run([isa_qc], shots=shots).result()
 
-    counts = result[0].data.meas.get_counts()
+    counts = result[0].data.cr.get_counts()
     return counts
     
 def calc_expval(phi):
-    print(phi)
+    # print(phi)
     expval = 1
-    for M_hat, x_list in zip(M_hats, x_index_list):
-        counts = run_circuit(phi, M_hat)
+
+    counts = run_circuit(phi)
+    for x_list in x_index_list:
         expval += post_select(counts, x_list) / shots
     expval /= math.pow(math.cos(phi[0]), 2)
-    # expval *= 100
-    print(expval)
+    # # expval *= 100
+    print(phi, expval)
+    exit()
+    # expval = run_circuit(phi, M_hats[0])
     return expval
 
 #The rest is basically for running the optimizer
 
 init = [np.pi / 2]  * (2 ** N_M - 1)
 init.insert(0, 3 * np.pi / 4, ) #Initial parameters
-init = [3.36172813, 1.57079631, 1.57079679, 0.22012573]
+# init = [3.36172813, 1.57079631, 1.57079679, 0.22012573]
+init = [np.pi, 0, np.pi / 2, np.pi / 2]
 bounds = [(-np.pi, np.pi)] * (2 ** N_M - 1)
 bounds.insert(0, ( np.pi / 2, 3 * np.pi / 2))
 bounds = tuple(bounds) #Bounds
