@@ -24,99 +24,37 @@ from qiskit_ibm_runtime import EstimatorV2 as Estimator
 from qiskit_ibm_runtime.options import ExecutionOptions, Options
 from qiskit.quantum_info import DensityMatrix,partial_trace, SparsePauliOp
 
-
-#This is used for calculating the 2^-j values
-#Very naive approach
-def calcBinaryMatrix(n: int):
-    matrixSize = int((2 ** (n / 2)) * (2 ** (n / 2)))
-    y = [[]] * matrixSize
-    for i in range(matrixSize):
-        sum = 0
-        for j in range(n):
-            bit_value = 2 ** -(n - j)
-            sum += bit_value * ((-1) ** (i >> j))
-        y[i] = sum
-    return y
-
-#This is used to calculate the estimate values from the binary matrix e.g. the digitalization of the
-#data
-#Also very naice approach
-def estimate(xx: float, n: int, matrix):
-    half = int(len(matrix) / 2)
-    difference = 2 ** 31
-    index = 0
-    if xx >= 0: 
-        for i in range(half):
-            if np.abs(matrix[i] - xx) < difference:
-                difference = np.abs(matrix[i] - xx)
-                index = i
-    else:
-        for i in range(half, len(matrix)):
-            if np.abs(matrix[i] - xx) < difference:
-                difference = np.abs(matrix[i] - xx)
-                index = i
-    estimated = [0] * n
-    for i in range(n):
-        estimated[i] = (index >> i) & 1
-    return estimated
-
-#This produces the delta_hat operator. See the paper for reference
-def createDeltaHat(a: float, n: int):
-    Z = sparse.csc_matrix(np.array([[1, 0], [0, -1]]))
-    I = sparse.csc_matrix(np.array([[1, 0], [0, 1]]))
-
-    j = 2 ** -1
-    first = Z
-    for i in range(1, n):
-        # first = first.tensor(I)
-        first = sparse.kron(first, I)
-
-    delta_hat = (a * j) * first
-
-    for i in range(1, n):
-        delta = I
-        for k in range(1, n):
-            if i == k:
-                # delta = delta.tensor(Z)
-                delta = sparse.kron(delta, Z)
-            else:
-                # delta = delta.tensor(I)
-                delta = sparse.kron(delta, I)
-        delta_hat += (a * 2 ** -(j + 1)) * delta
-    # print(delta_hat)
-    return delta_hat
-        
 #This is the unitary for endocing the data in the binary encoded data approach. See paper for reference
-def createU_k(k_index: int, x_k: float):
-    Z = sparse.csc_matrix(np.array([[1, 0], [0, -1]]))
-    I = sparse.identity(2, format='csc')
-    
-    k = np.array([0] * 2 ** QPU_len)
-    k[k_index] = 1
-    k.shape = (2 ** QPU_len, 1)
-    k = sparse.csc_matrix(k)
-    k = k.dot(k.transpose())
+def createU_k(circuit, data):
+    for i in range(len(data)):
+        bit_string = ("{:0{width}b}".format(i, width=QPU_len))[::-1]
+        x_index_list = [i + 1 for i, x in enumerate(bit_string) if x == '0']
+        for j in range(2):
+            if len(x_index_list) > 0: circuit.x(x_index_list)
+            if j == 0:
+                circuit.mcp(data[i], [x + 1 for x in range(QPU_len)], 0)
+                circuit.x(0)
+                circuit.mcp(-data[i], [x + 1 for x in range(QPU_len)], 0)
+                circuit.x(0)
 
-    U = expm(-1j * x_k * sparse.kron(Z, k))
-    return U
-
+        circuit.barrier([x for x in range(QPU_len + 1)])
+        
 #This is the unitary for regression coefficients.
-def createU_m(phi_m: float, m_index: int):
-    Z = sparse.csc_matrix(np.array([[1, 0], [0, -1]]))
-    
+def createU_m(circuit, col_reg, phi_array):
+    for i in range(len(phi_array)):
+        bit_string = ("{:0{width}b}".format(i, width=N_M))[::-1]
+        x_index_list = [i + 1 + N_L for i, x in enumerate(bit_string) if x == '0']
 
-    global N_L
-    global N_M
+        for j in range(2):
+            if len(x_index_list) > 0: circuit.x(x_index_list)
+            if j == 0:
+                circuit.mcp(-phi_array[i], col_reg, 0)
+                circuit.x(0)
+                circuit.mcp(phi_array[i], col_reg, 0)
+                circuit.x(0)
+ 
+        circuit.barrier([x for x in range(QPU_len + 1)])
 
-    I = sparse.identity(2 ** N_L, format='csc')
-
-    m_projector = np.array([0] * 2 ** N_M)
-    m_projector[m_index] = 1
-    m_projector.shape = (2 ** N_M, 1)
-    m_projector = sparse.csc_matrix(m_projector)
-    m_projector = m_projector.dot(m_projector.transpose())
-    U = expm(1j * phi_m * sparse.kron(I, sparse.kron(m_projector, Z)))
-    return U
 
 
 #The measurement operator
@@ -136,18 +74,14 @@ def cut_counts(counts, bit_indexes):
     new_counts = {}
 
     for key in counts:
-        # if(key[-1] == '1' and key[-2] == '0'):
-        if(key[-1] == '0'):
-            # print(key)
+        if(key[-1] == '1' and key[-2] == '0'):
             new_key = ''
             for index in bit_indexes:
-                new_key += key[-2 - index]
+                new_key += key[-3 - index]
             if new_key in new_counts:
                 new_counts[new_key] += counts[key]
             else:
                 new_counts[new_key] = counts[key]
-    # print(counts)
-    # print(new_counts)
     return new_counts
 
 def post_select(counts, x_index_list):
@@ -160,6 +94,7 @@ def post_select(counts, x_index_list):
         else:
             expval -= value
     return expval
+
 # df = pd.read_csv("./Diabetes_dataset.csv")
 
 # X = np.array(df.iloc[:,:-1])
@@ -188,11 +123,7 @@ QPU_len = N_M + N_L
 data = np.empty((l, m))
 
 for i in range(l):
-    # print(data[i])
-    data[i] = np.append(y[i], X[i]) #Reverse the data order
-    # print(data[i])
-    # exit()
-
+    data[i] = np.flip(np.append(X[i], y[i]))
 
 squareSum = 0
 data = data.transpose()
@@ -213,92 +144,44 @@ for i in range(l):
     dataPadded[i] = np.append(data[i], [0] * (int(2**N_M - m)))
 
 data = dataPadded.flatten()
+shots = 2 ** 14
 
-data_copy = np.copy(data)
-for j in range(2 ** QPU_len):
-    reversed_index = int(("{:0{width}b}".format(j, width=QPU_len))[::-1], 2)
-    data[reversed_index] = data_copy[j]
-
-epsilon = 10**-15
-shots = 2 ** 17
-
-print(QPU_len)
-
-# M_hat = np.real(createM_hat().to_matrix())
-sparse_U_k = [createU_k(i, data[i]) for i in range(len(data))]
-sparse_U_k_product = reduce(lambda operator, product: operator.multiply(product), sparse_U_k)
-# M_hat = Operator(createM_hat().toarray())
 x_index_list = create_x_index_list()
 
 #Function for NM optimizer
 def run_circuit(phi):
-
     ar = AncillaRegister(1, 'ancilla')
     row_reg = QuantumRegister(N_L, 'l')
     col_reg = QuantumRegister(N_M, 'm')
-    cr = ClassicalRegister(N_M + 1, 'cr')
+    cr = ClassicalRegister(N_M + 2, 'cr')
 
-    # psi = QuantumCircuit(ar, qpu, cr)
     psi = QuantumCircuit(ar, row_reg, col_reg,  cr)
 
+    psi.h([x for x in range(QPU_len + 1)])
+    createU_k(psi, data)
 
-    # estimated = np.copy(data)
-    # squareSum = 0
-    # # phi = phi[::-1]
-    # for j in range(2 ** N_L):
-    #     for i in range(2 ** N_M):
-    #         index = j * 2 ** N_M + i
-    #         reversed_index = int(("{:0{width}b}".format(index, width=QPU_len))[::-1], 2)
-    #         estimated[reversed_index] = estimated[reversed_index]
-    #         squareSum += np.square(estimated[reversed_index])
-
-    # squareSum = np.sqrt(squareSum)
-    # estimated = estimated / squareSum
-
-    psi.initialize(data, [row_reg, col_reg])
-    # ordering1 = [0, 3, 2, 1]
-    # ordering2 = [0, 1, 2, 3]
-    sparse_U_m = [createU_m(phi[i], i) for i in range(2 ** N_M)]
-    # sparse_U_m_product = reduce(lambda operator, product: operator.multiply(product), sparse_U_m)
-
-    # psi.h([x for x in range(QPU_len + 1)])
-
-    # for U in sparse_U_k:
-    #     psi.append(Operator(U.toarray()), [x for x in range(1 + QPU_len)])
-
-    # # # psi.append(Operator(sparse_U_k_product.toarray()), [x for x in range(1 + QPU_len)])
-    # psi.h(ar)
-    # psi.measure(ar, cr[0])
-    # psi.x(ar)
-    psi.h(ar)
-    for U in sparse_U_m:
-        psi.append(Operator(U.toarray()), [x for x in range(1 + QPU_len)])
-    # # psi.append(Operator(sparse_U_m_product.toarray()), [x for x in range(1 + QPU_len)])
+    psi.z(0)
     psi.h(ar)
     psi.measure(ar, cr[0])
+    psi.x(ar)
+    psi.h(ar)
+    psi.barrier([x for x in range(QPU_len + 1)])
+    createU_m(psi, col_reg, phi)
+    psi.h(ar)
+    psi.measure(ar, cr[1])
+    psi.barrier([x for x in range(QPU_len + 1)])
 
     psi.h(col_reg)
 
-    # hamiltonian = SparsePauliOp(['IIIII', 'IXIII', 'XIIII', 'XXIII'])
     for i in range(N_M):
-        psi.measure(col_reg[i], cr[i + 1])
-    # psi.measure_all()
+        psi.measure(col_reg[i], cr[i + 2])
 
-    # print(psi)
+    print(psi)
+    # exit()
     aer_sim = AerSimulator()
     pm = generate_preset_pass_manager(backend=aer_sim, optimization_level=1)
     isa_qc = pm.run(psi)
-    # isa_observables = hamiltonian.apply_layout(isa_qc.layout)
 
-    # estimator = Estimator(backend=aer_sim, options={"default_precision": 0.005})
-    # job = estimator.run([(isa_qc, isa_observables)])
-    # pub_result = job.result()[0]
-    # print(phi)
-    # print(f"Expectation values: {pub_result.data.evs / math.pow(math.cos(phi[0]), 2)}")
-    # exit()
-    # return pub_result.data.evs / math.pow(math.cos(phi[0]), 2)
-    # exit()
-    # # print(isa_qc)
     with Session(backend=aer_sim) as session:
         sampler = Sampler(session=session)
         result = sampler.run([isa_qc], shots=shots).result()
@@ -307,17 +190,14 @@ def run_circuit(phi):
     return counts
     
 def calc_expval(phi):
-    # print(phi)
     expval = 1
 
     counts = run_circuit(phi)
     for x_list in x_index_list:
         expval += post_select(counts, x_list) / shots
     expval /= math.pow(math.cos(phi[0]), 2)
-    # # expval *= 100
     print(phi, expval)
     exit()
-    # expval = run_circuit(phi, M_hats[0])
     return expval
 
 #The rest is basically for running the optimizer
@@ -325,7 +205,8 @@ def calc_expval(phi):
 init = [np.pi / 2]  * (2 ** N_M - 1)
 init.insert(0, 3 * np.pi / 4, ) #Initial parameters
 # init = [3.36172813, 1.57079631, 1.57079679, 0.22012573]
-init = [np.pi, 0, np.pi / 2, np.pi / 2]
+init = [np.pi, np.pi / 2, np.pi / 2, 0]
+# init = [np.pi, np.pi, 0, 0]
 bounds = [(-np.pi, np.pi)] * (2 ** N_M - 1)
 bounds.insert(0, ( np.pi / 2, 3 * np.pi / 2))
 bounds = tuple(bounds) #Bounds

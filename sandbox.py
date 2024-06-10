@@ -21,7 +21,7 @@ def run_qc(shots, x_index_list):
     aer_sim = AerSimulator()
     pm = generate_preset_pass_manager(backend=aer_sim, optimization_level=1)
     isa_qc = pm.run(qc)
-
+    print(qc)
 
     with Session(backend=aer_sim) as session:
         sampler = Sampler(session=session)

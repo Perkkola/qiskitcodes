@@ -4,9 +4,8 @@ from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 from qiskit_ibm_runtime import Session, SamplerV2 as Sampler
 import numpy as np
 
-reversed_number = int(("{:0{width}b}".format(3, width=5))[::-1], 2)
-# print(reversed_number)
-
-print(int(7 / 4), 7 % 4)
-
-
+qc = QuantumCircuit(3)
+qc.mcp(0.25, [0, 1], 2)
+print(qc.decompose().decompose().decompose().decompose())
+qc.barrier()
+qc.p()
