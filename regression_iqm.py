@@ -4,80 +4,63 @@ import os
 import math
 import numpy as np
 import pandas as pd
-from functools import reduce
-from collections import OrderedDict
-from scipy import sparse
-from scipy import optimize
-from sklearn.preprocessing import StandardScaler, normalize
-from scipy.sparse.linalg import expm, expm_multiply
-from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
 
 from qiskit import QuantumCircuit, ClassicalRegister, QuantumRegister, AncillaRegister
+from qiskit.transpiler import PassManager, CouplingMap, TransformationPass
 from qiskit.circuit.library import RZGate, MCMT
 from qiskit.quantum_info.operators import Operator, Pauli, SparsePauliOp
-from qiskit.transpiler import PassManager, CouplingMap, TransformationPass
 from qiskit.quantum_info import Statevector
 from qiskit.compiler import transpile
-# from qiskit.primitives import Estimator
 from qiskit_aer import AerSimulator
+from scipy import optimize
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
-from qiskit_ibm_runtime import Session, SamplerV2 as Sampler
-from qiskit_ibm_runtime import EstimatorV2 as Estimator
-from qiskit_ibm_runtime.options import ExecutionOptions, Options
-from qiskit.quantum_info import DensityMatrix,partial_trace, SparsePauliOp
+from qiskit import execute
+
+from iqm.qiskit_iqm import IQMProvider, transpile_to_IQM, IQMFakeAdonis, IQMFakeApollo, IQMFakeDeneb
+# from iqm.qiskit_iqm.fake_backends import fake_apollo, fake_adonis
+# from iqm.qiskit_iqm import IQMProvider, transpile_to_IQM
+# from iqm.qiskit_qim.fake_backends import fake_apollo
 
 #This is the unitary for endocing the data in the binary encoded data approach. See paper for reference
-# def createU_k(circuit, data_arr):
-#     for i in range(len(data_arr)):
-#         bit_string = ("{:0{width}b}".format(i, width=QPU_len))[::-1]
-#         x_index_list = [i + 1 for i, x in enumerate(bit_string) if x == '0']
-#         for j in range(2):
-#             if len(x_index_list) > 0: circuit.x(x_index_list)
-#             if j == 0:
-#                 # rz = RZGate(data[i] * 2)
-#                 # mcrz = MCMT(rz, QPU_len, 1)
-#                 # circuit.append(mcrz, [x for x in range(QPU_len + 1)][::-1])
-#                 circuit.mcp(-data_arr[i], [x + 1 for x in range(QPU_len)], 0)
-#                 circuit.mcx([x + 1 for x in range(QPU_len)], 0)
-#                 # circuit.x(0)
-#                 circuit.mcp(data_arr[i], [x + 1 for x in range(QPU_len)], 0)
-#                 # circuit.x(0)
-#                 # circuit.mcx([x + 1 for x in range(QPU_len)], 0)
+def createU_k(circuit, data):
+    for i in range(len(data)):
+        bit_string = ("{:0{width}b}".format(i, width=QPU_len))[::-1]
+        x_index_list = [i + 1 for i, x in enumerate(bit_string) if x == '0']
+        for j in range(2):
+            if len(x_index_list) > 0: circuit.x(x_index_list)
+            if j == 0:
+                # rz = RZGate(-data[i])
+                # mcrz = MCMT(rz, QPU_len, 1)
+                # circuit.append(mcrz, [x for x in range(QPU_len + 1)][::-1])
+                circuit.mcp(data[i], [x + 1 for x in range(QPU_len)], 0)
+                # circuit.mcx([x + 1 for x in range(QPU_len)], 0)
+                circuit.x(0)
+                circuit.mcp(-data[i], [x + 1 for x in range(QPU_len)], 0)
+                circuit.x(0)
+                # circuit.mcx([x + 1 for x in range(QPU_len)], 0)
 
-#         circuit.barrier([x for x in range(QPU_len + 1)])
-
-def createU_k(k_index: int, x_k: float):
-    Z = sparse.csc_matrix(np.array([[1, 0], [0, -1]]))
-    I = sparse.identity(2, format='csc')
-    
-    k = np.array([0] * 2 ** QPU_len)
-    k[k_index] = 1
-    k.shape = (2 ** QPU_len, 1)
-    k = sparse.csc_matrix(k)
-    k = k.dot(k.transpose())
-    U = expm(-1j * x_k * sparse.kron(Z, k))
-    return U
+        # circuit.barrier([x for x in range(QPU_len + 1)])
         
 #This is the unitary for regression coefficients.
 def createU_m(circuit, col_reg, phi_array):
     for i in range(len(phi_array)):
         bit_string = ("{:0{width}b}".format(i, width=N_M))[::-1]
         x_index_list = [i + 1 for i, x in enumerate(bit_string) if x == '0']
-        mcrz_index_list = [x + 1 for x in range(N_M)]
-        mcrz_index_list.append(0)
+        # mcrz_index_list = [x + 1 + N_L for x in range(N_M)]
+        # mcrz_index_list.append(0)
         for j in range(2):
             if len(x_index_list) > 0: circuit.x(x_index_list)
             if j == 0:
-                rz = RZGate(phi_array[i] * 2)
-                mcrz = MCMT(rz, N_M, 1)
-                circuit.append(mcrz, mcrz_index_list)
-                # circuit.mcp(phi_array[i], col_reg, 0)
+                # rz = RZGate(phi_array[i])
+                # mcrz = MCMT(rz, N_M, 1)
+                # circuit.append(mcrz, mcrz_index_list)
+                circuit.mcp(-phi_array[i], col_reg, 0)
                 # circuit.mcx(col_reg, 0)
-                # circuit.x(0)
-                # circuit.mcp(phi_array[i], col_reg, 0)
+                circuit.x(0)
+                circuit.mcp(phi_array[i], col_reg, 0)
                 # circuit.mcx(col_reg, 0)
-                # circuit.x(0)
+                circuit.x(0)
  
         circuit.barrier([x for x in range(QPU_len + 1)])
 
@@ -98,18 +81,17 @@ def create_x_index_list():
 def cut_counts(counts, bit_indexes):
     bit_indexes.sort(reverse=True) 
     new_counts = {}
-    # print(counts)
+
     for key in counts:
-        if(key[-1] == '1'):
+        # if(key[-1] == '1' and key[-2] == '0'):
         # if(key[-1] == '0'):
-            new_key = ''
-            for index in bit_indexes:
-                new_key += key[-2 - index]
-            if new_key in new_counts:
-                new_counts[new_key] += counts[key]
-            else:
-                new_counts[new_key] = counts[key]
-    # print(new_counts)
+        new_key = ''
+        for index in bit_indexes:
+            new_key += key[-1 - index]
+        if new_key in new_counts:
+            new_counts[new_key] += counts[key]
+        else:
+            new_counts[new_key] = counts[key]
     return new_counts
 
 def post_select(counts, x_index_list):
@@ -122,6 +104,22 @@ def post_select(counts, x_index_list):
         else:
             expval -= value
     return expval
+
+class RemoveResets(TransformationPass):
+    def run(self, dag):
+        for node in dag.op_nodes():
+            if node.op.name == 'reset':
+                
+                dag.remove_op_node(node)
+        return dag
+
+# df = pd.read_csv("./Admission_Predict.csv")
+
+# X = np.array(df.iloc[:,1:-1])
+# y = np.array(df.iloc[:,-1])
+
+# X, X_test, y, y_test = train_test_split(X, y, test_size=0.36, random_state=42)
+
 
 X = np.array([[-0.32741112, -0.11288069,  0.49650164],
        [-0.94268847, -0.78149813, -0.49440176],
@@ -180,27 +178,19 @@ data = dataPadded.flatten()
 # for j in range(2 ** QPU_len):
 #     reversed_index = int(("{:0{width}b}".format(j, width=QPU_len))[::-1], 2)
 #     data[reversed_index] = data_copy[j]
-shots = 2 ** 14
+shots = 2 ** 16
 print(QPU_len)
 
 x_index_list = create_x_index_list()
 
-class RemoveResets(TransformationPass):
-    def run(self, dag):
-        for node in dag.op_nodes():
-            if node.op.name == 'reset':
-                
-                dag.remove_op_node(node)
-        return dag
-
 #Function for NM optimizer
 def run_circuit(phi):
-    ar = AncillaRegister(1, 'ancilla')
+    # ar = AncillaRegister(1, 'ancilla')
     row_reg = QuantumRegister(N_L, 'l')
     col_reg = QuantumRegister(N_M, 'm')
-    cr = ClassicalRegister(N_M + 1, 'cr')
+    cr = ClassicalRegister(N_M, 'cr')
 
-    psi = QuantumCircuit(ar, col_reg, row_reg,  cr)
+    psi = QuantumCircuit(col_reg, row_reg,  cr)
 
 
     estimated = np.copy(data)
@@ -215,59 +205,65 @@ def run_circuit(phi):
     squareSum = np.sqrt(squareSum)
     estimated = estimated / squareSum
 
-    psi.h([x for x in range(QPU_len + 1)])
-    for i in range(len(estimated)):
-        u_k = createU_k(i, estimated[i])
-        psi.append(Operator(u_k.toarray()), [x for x in range(QPU_len + 1)])
     # for j in range(2 ** N_L):
     #     for i in range(2 ** N_M):
-    #         estimated[j * 2 ** N_M + i] = estimated[j * 2 ** N_M + i] / math.cos(phi[i])
-            # estimated[j * 2 ** N_M + i] = estimated[j * 2 ** N_M + i]
-            # squareSum += np.square(estimated[j * 2 ** N_M + i])
+    # #         estimated[j * 2 ** N_M + i] = estimated[j * 2 ** N_M + i] / math.cos(phi[i])
+    #         # estimated[j * 2 ** N_M + i] = estimated[j * 2 ** N_M + i]
+    #         # squareSum += np.square(estimated[j * 2 ** N_M + i])
 
 
-    # psi.initialize(data, [col_reg, row_reg])
-    # psi.x(ar)
-    # createU_k(psi, estimated)
+    psi.initialize(estimated, [col_reg, row_reg])
+    # psi.h([x for x in range(QPU_len + 1)])
+    # createU_k(psi, data)
 
-    psi.x(ar)
-    psi.h(ar)
-    # psi.x(ar)
-    psi.measure(ar, cr[0])
+    # psi.z(0)
+    # psi.h(ar)
+    # psi.measure(ar, cr[0])
     # psi.x(ar)
     # psi.h(ar)
     # psi.barrier([x for x in range(QPU_len + 1)])
     # createU_m(psi, col_reg, phi)
     # psi.h(ar)
     # psi.measure(ar, cr[1])
-    psi.barrier([x for x in range(QPU_len + 1)])
+    # psi.barrier([x for x in range(QPU_len + 1)])
 
     psi.h(col_reg)
 
     for i in range(N_M):
-        psi.measure(col_reg[i], cr[i + 1])
+        psi.measure(col_reg[i], cr[i])
 
     # print(psi)
     # exit()
-    # psi = psi.decompose().decompose().decompose().decompose().decompose().decompose().decompose().decompose()
-    # print(psi)
+    # iqm_server_url = "https://cocos.resonance.meetiqm.com/deneb"
+    # provider = IQMProvider(iqm_server_url)
+    psi = psi.decompose(reps=10)
+    pm = PassManager([RemoveResets()]) 
+    psi_no_resets = pm.run(psi)
+
+    # backend = IQMFakeAdonis()
+    # backend = IQMFakeApollo()
+    backend = IQMFakeDeneb()
+    transpiled_circuit = transpile_to_IQM(psi_no_resets, backend, optimization_level=1)
+    # qc_transpiled = transpile(psi_no_resets, backend=backend, layout_method='sabre', optimization_level=1)
+    # print(qc_transpiled.draw(output='text', idle_wires=False))
     # exit()
-    # pm = PassManager([RemoveResets()]) 
-    # psi_no_resets = pm.run(psi)
-    # print(psi_no_resets)
-    # exit()
-    aer_sim = AerSimulator()
-    pm = generate_preset_pass_manager(backend=aer_sim, optimization_level=1)
-    isa_qc = pm.run(psi)
+    job = execute(transpiled_circuit, backend, shots=shots)
+    counts = job.result().get_counts()
+    # print(backend.error_profile)
+    return counts
+    # print(transpiled_circuit)
+    # aer_sim = AerSimulator()
+    # pm = generate_preset_pass_manager(backend=aer_sim, optimization_level=3)
+    # isa_qc = pm.run(psi)
 
     # print(isa_qc.depth())
     # exit()
-    with Session(backend=aer_sim) as session:
-        sampler = Sampler(session=session)
-        result = sampler.run([isa_qc], shots=shots).result()
+    # with Session(backend=aer_sim) as session:
+    #     sampler = Sampler(session=session)
+    #     result = sampler.run([isa_qc], shots=shots).result()
 
-    counts = result[0].data.cr.get_counts()
-    return counts
+    # counts = result[0].data.cr.get_counts()
+    # return counts
     
 def calc_expval(phi):
     expval = 1
@@ -277,7 +273,7 @@ def calc_expval(phi):
         expval += post_select(counts, x_list) / shots
     expval /= math.pow(math.cos(phi[0]), 2)
     print(phi, expval)
-    # exit()
+    exit()
     return expval
 
 #The rest is basically for running the optimizer
