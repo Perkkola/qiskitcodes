@@ -16,10 +16,8 @@ from qiskit.compiler import transpile
 from qiskit_aer import AerSimulator
 from scipy import optimize
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
-from qiskit import execute
-from qiskit.tools.monitor import job_monitor
+from qiskit_ibm_runtime import Session, SamplerV2 as Sampler
 
-from iqm.qiskit_iqm import IQMProvider
 np.set_printoptions(threshold=sys.maxsize)
 
 # from iqm.qiskit_iqm.fake_backends import fake_apollo, fake_adonis
@@ -124,9 +122,7 @@ class RemoveResets(TransformationPass):
 
 # X, X_test, y, y_test = train_test_split(X, y, test_size=0.36, random_state=42)
 
-os.environ["IQM_TOKEN"] = "Dbbsj2DrKgei0cm489FomBmg6zpAQZOuyTeTpwu0xO0GZ6s4ZhZ3goAAiz4agCSp"
-provider=IQMProvider(url="https://cocos.resonance.meetiqm.com/garnet:mock")
-backend = provider.get_backend()
+
 
 # X = np.array([[-0.32741112, -0.11288069,  0.49650164],
 #        [-0.94268847, -0.78149813, -0.49440176],
@@ -154,7 +150,7 @@ data = np.empty((l, m))
 for i in range(l):
     data[i] = np.flip(np.append(X[i], y[i])) #Reverse the data order
 
-numBatches = 16 #Number of batches
+numBatches = 4 #Number of batches
 batchSize = int(np.ceil(l / numBatches))
 
 data = [data[i:i + batchSize] for i in range(0, len(data), batchSize)]
@@ -248,24 +244,17 @@ def run_circuit(phi, batched_data):
     for i in range(N_M):
         psi.measure(col_reg[i], cr[i])
 
-    # print(psi)
-    # exit()
-    # iqm_server_url = "https://cocos.resonance.meetiqm.com/deneb"
-    # provider = IQMProvider(iqm_server_url)
-    psi = psi.decompose(reps=10)
-    pm = PassManager([RemoveResets()]) 
-    psi_no_resets = pm.run(psi)
+    aer_sim = AerSimulator()
+    pm = generate_preset_pass_manager(backend=aer_sim, optimization_level=1)
+    isa_qc = pm.run(psi)
 
-    print(psi_no_resets.count_ops())
-    job = execute(psi_no_resets, backend, shots=shots)
-    # qc_transpiled = transpile(psi_no_resets, backend=backend, layout_method='sabre', optimization_level=1)
-    # print(qc_transpiled.draw(output='text', idle_wires=False))
+    # print(isa_qc.depth())
     # exit()
-    job_monitor(job)
+    with Session(backend=aer_sim) as session:
+        sampler = Sampler(session=session)
+        result = sampler.run([isa_qc], shots=shots).result()
 
-    res=job.result()
-    counts=res.get_counts()
-    # print(backend.error_profile)
+    counts = result[0].data.cr.get_counts()
     return counts
     # print(transpiled_circuit)
     # aer_sim = AerSimulator()
