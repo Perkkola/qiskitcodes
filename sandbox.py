@@ -3,16 +3,23 @@ from qiskit.circuit import QuantumCircuit, QuantumRegister, ClassicalRegister
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 from qiskit_ibm_runtime import Session, SamplerV2 as Sampler
 from qiskit_ibm_runtime import EstimatorV2 as Estimator
+from qiskit import transpile
 import numpy as np
+from qiskit.circuit.library import RZGate, MCMT
 
 def run_qc(shots, x_index_list):
 
-    cl = ClassicalRegister(2, 'cl1')
+    cl = ClassicalRegister(4, 'cl1')
 
-    qr = QuantumRegister(2, 'qr')
+    qr = QuantumRegister(4, 'qr')
 
     qc = QuantumCircuit(qr, cl)
-
+    rz = RZGate(0.25)
+    mcrz = MCMT(rz, 3, 1)
+    qc.append(mcrz, [3, 2, 1, 0])
+    # qc.mcp(0.25, [3, 2, 1], 0)
+    print(transpile(qc, basis_gates=['cx', 'h', 'rz'], optimization_level=3))
+    exit()
     # qc.h(qr)
     qc.initialize([1/(2*np.sqrt(2)), 1/2, 1/(2*np.sqrt(2)), 1/np.sqrt(2)], qc.qubits)
     qc.h(x_index_list)

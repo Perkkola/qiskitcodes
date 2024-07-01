@@ -28,56 +28,56 @@ from qiskit_ibm_runtime.options import ExecutionOptions, Options
 from qiskit.quantum_info import DensityMatrix,partial_trace, SparsePauliOp
 
 #This is the unitary for endocing the data in the binary encoded data approach. See paper for reference
-# def createU_k(circuit, data_arr):
-#     for i in range(len(data_arr)):
-#         bit_string = ("{:0{width}b}".format(i, width=QPU_len))[::-1]
-#         x_index_list = [i + 1 for i, x in enumerate(bit_string) if x == '0']
-#         for j in range(2):
-#             if len(x_index_list) > 0: circuit.x(x_index_list)
-#             if j == 0:
-#                 # rz = RZGate(data[i] * 2)
-#                 # mcrz = MCMT(rz, QPU_len, 1)
-#                 # circuit.append(mcrz, [x for x in range(QPU_len + 1)][::-1])
-#                 circuit.mcp(-data_arr[i], [x + 1 for x in range(QPU_len)], 0)
-#                 circuit.mcx([x + 1 for x in range(QPU_len)], 0)
-#                 # circuit.x(0)
-#                 circuit.mcp(data_arr[i], [x + 1 for x in range(QPU_len)], 0)
-#                 # circuit.x(0)
-#                 # circuit.mcx([x + 1 for x in range(QPU_len)], 0)
+def createU_k(circuit, data_arr):
+    for i in range(len(data_arr)):
+        bit_string = ("{:0{width}b}".format(i, width=QPU_len))[::-1]
+        x_index_list = [i + 1 for i, x in enumerate(bit_string) if x == '0']
+        for j in range(2):
+            if len(x_index_list) > 0: circuit.x(x_index_list)
+            if j == 0:
+                # rz = RZGate(data[i] * 2)
+                # mcrz = MCMT(rz, QPU_len, 1)
+                # circuit.append(mcrz, [x for x in range(QPU_len + 1)][::-1])
+                circuit.mcp(data_arr[i], [x + 1 for x in range(QPU_len)], 0)
+                # circuit.mcx([x + 1 for x in range(QPU_len)], 0)
+                circuit.x(0)
+                circuit.mcp(-data_arr[i], [x + 1 for x in range(QPU_len)], 0)
+                circuit.x(0)
+                # circuit.mcx([x + 1 for x in range(QPU_len)], 0)
 
-#         circuit.barrier([x for x in range(QPU_len + 1)])
+        circuit.barrier([x for x in range(QPU_len + 1)])
 
-def createU_k(k_index: int, x_k: float):
-    Z = sparse.csc_matrix(np.array([[1, 0], [0, -1]]))
-    I = sparse.identity(2, format='csc')
+# def createU_k(k_index: int, x_k: float):
+#     Z = sparse.csc_matrix(np.array([[1, 0], [0, -1]]))
+#     I = sparse.identity(2, format='csc')
     
-    k = np.array([0] * 2 ** QPU_len)
-    k[k_index] = 1
-    k.shape = (2 ** QPU_len, 1)
-    k = sparse.csc_matrix(k)
-    k = k.dot(k.transpose())
-    U = expm(-1j * x_k * sparse.kron(Z, k))
-    return U
+#     k = np.array([0] * 2 ** QPU_len)
+#     k[k_index] = 1
+#     k.shape = (2 ** QPU_len, 1)
+#     k = sparse.csc_matrix(k)
+#     k = k.dot(k.transpose())
+#     U = expm(-1j * x_k * sparse.kron(Z, k))
+#     return U
         
 #This is the unitary for regression coefficients.
 def createU_m(circuit, col_reg, phi_array):
     for i in range(len(phi_array)):
         bit_string = ("{:0{width}b}".format(i, width=N_M))[::-1]
         x_index_list = [i + 1 for i, x in enumerate(bit_string) if x == '0']
-        mcrz_index_list = [x + 1 for x in range(N_M)]
-        mcrz_index_list.append(0)
+        # mcrz_index_list = [x + 1 for x in range(N_M)]
+        # mcrz_index_list.append(0)
         for j in range(2):
             if len(x_index_list) > 0: circuit.x(x_index_list)
             if j == 0:
-                rz = RZGate(phi_array[i] * 2)
-                mcrz = MCMT(rz, N_M, 1)
-                circuit.append(mcrz, mcrz_index_list)
-                # circuit.mcp(phi_array[i], col_reg, 0)
+                # rz = RZGate(phi_array[i] * 2)
+                # mcrz = MCMT(rz, N_M, 1)
+                # circuit.append(mcrz, mcrz_index_list)
+                circuit.mcp(-phi_array[i], col_reg, 0)
                 # circuit.mcx(col_reg, 0)
-                # circuit.x(0)
-                # circuit.mcp(phi_array[i], col_reg, 0)
+                circuit.x(0)
+                circuit.mcp(phi_array[i], col_reg, 0)
                 # circuit.mcx(col_reg, 0)
-                # circuit.x(0)
+                circuit.x(0)
  
         circuit.barrier([x for x in range(QPU_len + 1)])
 
@@ -99,28 +99,32 @@ def cut_counts(counts, bit_indexes):
     bit_indexes.sort(reverse=True) 
     new_counts = {}
     # print(counts)
+    discarded = 0
     for key in counts:
-        if(key[-1] == '1'):
-        # if(key[-1] == '0'):
+        # if(key[-1] == '1'):
+        if(key[-1] == '1' and key[-2] == '0'):
             new_key = ''
             for index in bit_indexes:
-                new_key += key[-2 - index]
+                new_key += key[-3 - index]
             if new_key in new_counts:
                 new_counts[new_key] += counts[key]
             else:
                 new_counts[new_key] = counts[key]
+        else:
+            discarded += counts[key]
     # print(new_counts)
-    return new_counts
+    new_shots = shots - discarded
+    return new_counts, new_shots
 
 def post_select(counts, x_index_list):
 
-    x_counts = cut_counts(counts, x_index_list)
+    x_counts, new_shots = cut_counts(counts, x_index_list)
     expval = 0
     for key, value in zip(x_counts.keys(), x_counts.values()):
         if(key.count('1') % 2 == 0):
-            expval += value
+            expval += value / new_shots
         else:
-            expval -= value
+            expval -= value / new_shots
     return expval
 
 X = np.array([[-0.32741112, -0.11288069,  0.49650164],
@@ -198,27 +202,23 @@ def run_circuit(phi):
     ar = AncillaRegister(1, 'ancilla')
     row_reg = QuantumRegister(N_L, 'l')
     col_reg = QuantumRegister(N_M, 'm')
-    cr = ClassicalRegister(N_M + 1, 'cr')
+    cr = ClassicalRegister(N_M + 2, 'cr')
 
     psi = QuantumCircuit(ar, col_reg, row_reg,  cr)
 
 
     estimated = np.copy(data)
-    squareSum = 0
+    # squareSum = 0
 
-    for j in range(2 ** N_L):
-        for i in range(2 ** N_M):
-            estimated[j * 2 ** N_M + i] = estimated[j * 2 ** N_M + i] * math.cos(phi[i])
-            # estimated[j * 2 ** N_M + i] = estimated[j * 2 ** N_M + i]
-            squareSum += np.square(estimated[j * 2 ** N_M + i])
+    # for j in range(2 ** N_L):
+    #     for i in range(2 ** N_M):
+    #         estimated[j * 2 ** N_M + i] = estimated[j * 2 ** N_M + i]
+    #         # estimated[j * 2 ** N_M + i] = estimated[j * 2 ** N_M + i]
+    #         squareSum += np.square(estimated[j * 2 ** N_M + i])
 
-    squareSum = np.sqrt(squareSum)
-    estimated = estimated / squareSum
+    # squareSum = np.sqrt(squareSum)
+    # estimated = estimated / squareSum
 
-    psi.h([x for x in range(QPU_len + 1)])
-    for i in range(len(estimated)):
-        u_k = createU_k(i, estimated[i])
-        psi.append(Operator(u_k.toarray()), [x for x in range(QPU_len + 1)])
     # for j in range(2 ** N_L):
     #     for i in range(2 ** N_M):
     #         estimated[j * 2 ** N_M + i] = estimated[j * 2 ** N_M + i] / math.cos(phi[i])
@@ -226,31 +226,31 @@ def run_circuit(phi):
             # squareSum += np.square(estimated[j * 2 ** N_M + i])
 
 
-    # psi.initialize(data, [col_reg, row_reg])
+    # psi.initialize(estimated, [col_reg, row_reg])
     # psi.x(ar)
-    # createU_k(psi, estimated)
+    psi.h([x for x in range(QPU_len + 1)])
+    createU_k(psi, estimated)
 
-    psi.x(ar)
+    # psi.x(ar)
+    # psi.z(ar)
     psi.h(ar)
     # psi.x(ar)
     psi.measure(ar, cr[0])
-    # psi.x(ar)
-    # psi.h(ar)
+    psi.x(ar)
+    psi.h(ar)
     # psi.barrier([x for x in range(QPU_len + 1)])
-    # createU_m(psi, col_reg, phi)
-    # psi.h(ar)
-    # psi.measure(ar, cr[1])
+    createU_m(psi, col_reg, phi)
+    psi.h(ar)
+    psi.measure(ar, cr[1])
     psi.barrier([x for x in range(QPU_len + 1)])
 
     psi.h(col_reg)
 
     for i in range(N_M):
-        psi.measure(col_reg[i], cr[i + 1])
+        psi.measure(col_reg[i], cr[i + 2])
 
-    # print(psi)
-    # exit()
     # psi = psi.decompose().decompose().decompose().decompose().decompose().decompose().decompose().decompose()
-    # print(psi)
+    # print(psi.decompose(reps=10).depth())
     # exit()
     # pm = PassManager([RemoveResets()]) 
     # psi_no_resets = pm.run(psi)
@@ -274,7 +274,7 @@ def calc_expval(phi):
 
     counts = run_circuit(phi)
     for x_list in x_index_list:
-        expval += post_select(counts, x_list) / shots
+        expval += post_select(counts, x_list)
     expval /= math.pow(math.cos(phi[0]), 2)
     print(phi, expval)
     # exit()
@@ -285,7 +285,7 @@ def calc_expval(phi):
 init = [np.pi / 2]  * (2 ** N_M - 1)
 init.insert(0, 3 * np.pi / 4, ) #Initial parameters
 # init = [3.36172813, 1.57079631, 1.57079679, 0.22012573]
-init = [np.pi, np.pi / 2, np.pi / 2, 0]
+# init = [np.pi, np.pi / 2, np.pi / 2, 0]
 # init = [np.pi, np.pi, 0, 0]
 bounds = [(-np.pi, np.pi)] * (2 ** N_M - 1)
 bounds.insert(0, ( np.pi / 2, 3 * np.pi / 2))
