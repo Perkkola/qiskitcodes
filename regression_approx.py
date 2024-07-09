@@ -8,6 +8,12 @@ from qiskit_ibm_runtime import Session, SamplerV2 as Sampler
 from qiskit_aer import AerSimulator
 from scipy import optimize
 import multiprocessing
+from adam import Adam
+import pandas as pd
+from sklearn.model_selection import train_test_split
+import sys
+
+np.set_printoptions(threshold=sys.maxsize)
 
 X = np.array([[-0.32741112, -0.11288069,  0.49650164],
        [-0.94268847, -0.78149813, -0.49440176],
@@ -21,8 +27,25 @@ X = np.array([[-0.32741112, -0.11288069,  0.49650164],
 y = np.array([ -8.02307406, -23.10019118,  16.79149797, -30.78951577,
         40.73946101,  10.53434892, -15.18438779, -13.3677773 ])
 
+X = np.array([[1, 2, 3],
+             [5, 6, 7],
+             [9, 10, 11],
+             [13, 14, 15],
+             [17, 18, 19],
+             [21, 22, 23],
+             [25, 26, 27],
+             [29, 30, 31]])
+
+y = np.array([4, 8, 12, 16, 20, 24, 28, 32])
+# df = pd.read_csv("./Admission_Predict.csv")
+
+# X = np.array(df.iloc[:,1:-1])
+# y = np.array(df.iloc[:,-1])
+
+# X, X_test, y, y_test = train_test_split(X, y, test_size=0.92, random_state=42)
 l = len(X) #Rows
 m = len(X[0]) + 1 #Columns (including label)
+
 
 N_M = int(np.ceil(np.log2(m))) #Binary length for column items
 N_L = int(np.ceil(np.log2(l))) #Binary length for row items
@@ -35,12 +58,15 @@ for i in range(l):
     data[i] = np.flip(np.append(X[i], y[i]))
 
 squareSum = 0
+
+
+
 data = data.transpose()
 
 # #Standardize column-wise and normalize globally
 for i in range(m):
-    data[i] = data[i] - np.mean(data[i])
-    data[i] = data[i] / np.std(data[i])
+    # data[i] = data[i] - np.mean(data[i])
+    # data[i] = data[i] / np.std(data[i])
     for j in range(l):
         squareSum += np.square(data[i][j])
 
@@ -48,7 +74,8 @@ data = data.transpose()
 squareSum = np.sqrt(squareSum)
 data = data / squareSum
 
-data = data.flatten()
+data = data.flatten() 
+
 
 # data = [1/2, 1/2, 1/2, 1/2]
 
@@ -58,7 +85,7 @@ for i in range(len(data)):
 def arr_to_dict(arr):
     dist = {}
     for i in range(len(arr)):
-        binary_string = ("{:0{width}b}".format(i, width=5))[::-1]
+        binary_string = ("{:0{width}b}".format(i, width=QPU_len))
         dist[binary_string] = arr[i]
     return dist
 
@@ -98,10 +125,12 @@ def run_circ(circuit, parameters):
     pm = generate_preset_pass_manager(backend=aer_sim, optimization_level=1)
     isa_qc = pm.run(b_qc)
 
-    sampler = Sampler(mode=aer_sim)
+    sampler = Sampler(backend=aer_sim)
     result = sampler.run([isa_qc], shots=shots).result()
 
+
     counts = result[0].data.meas.get_counts()
+    # distribution = {key: counts[key] / shots for key in counts.keys()}
     distribution = post_select(counts)
     return distribution
 
@@ -122,17 +151,19 @@ def post_select(counts):
     # dist_vals = np.fromiter(distribution.values(), dtype=float)
     return distribution
 
-def kernel(j, k, gamma=1.0):
-    x = -(j - k) ** 2 / (2 * gamma ** 2)
+def kernel(j, k, gamma=[1.0]):
+    x = (-(j - k) ** 2) / gamma
     return np.exp(x)
 
+def kernel_mean(X, Y, gamma=[1.0]):
+    return sum([kernel(int(j[::-1], 2), int(k[::-1], 2), g) * X[j] * Y[k] for j in X.keys()
+              for k in Y.keys() for g in gamma])
+
 def mmd_rbf(X, Y):
-    XX = sum([kernel(int(j[::-1], 2), int(k[::-1], 2)) * X[j] * X[k] for j in X.keys()
-              for k in X.keys()])
-    YY = sum([kernel(int(j[::-1], 2), int(k[::-1], 2)) * Y[j] * Y[k] for j in Y.keys()
-              for k in Y.keys()])
-    XY = sum([kernel(int(j[::-1], 2), int(k[::-1], 2)) * X[j] * Y[k] for j in X.keys()
-              for k in Y.keys()])
+    gamma = [0.25]
+    XX = kernel_mean(X, X, gamma)
+    YY = kernel_mean(Y, Y, gamma)
+    XY = kernel_mean(X, Y, gamma)
     return XX + YY - 2 * XY
 
 def loss(q, p, q_h, p_h):
@@ -141,6 +172,7 @@ def loss(q, p, q_h, p_h):
     return (mmd + mmd_h) / 2
 
 def gradient_block(q, p, q_h, p_h, parameters, s, index = None, return_dict = None):
+    gamma = [0.25]
     partial_diff_params = []
     for i in s:
         r_plus, r_minus = np.copy(parameters), np.copy(parameters)
@@ -149,28 +181,20 @@ def gradient_block(q, p, q_h, p_h, parameters, s, index = None, return_dict = No
         
         q_plus = run_circ(ansatz_qc, r_plus)
         q_minus = run_circ(ansatz_qc, r_minus)
-        q_h_plus = arr_to_dict(fwht(dict_to_arr(q_plus)))
-        q_h_minus = arr_to_dict(fwht(dict_to_arr(q_minus)))
-        # q_h_plus = run_circ(h_ansatz_qc, r_plus)
-        # q_h_minus = run_circ(h_ansatz_qc, r_minus)
+        # q_h_plus = arr_to_dict(fwht(dict_to_arr(q_plus)))
+        # q_h_minus = arr_to_dict(fwht(dict_to_arr(q_minus)))
+        q_h_plus = run_circ(h_ansatz_qc, r_plus)
+        q_h_minus = run_circ(h_ansatz_qc, r_minus)
 
-        X_plusX = sum([kernel(int(j[::-1], 2), int(k[::-1], 2)) * q_plus[j] * q[k] for j in q_plus.keys()
-                for k in q.keys()])
-        X_minusX = sum([kernel(int(j[::-1], 2), int(k[::-1], 2)) * q_minus[j] * q[k] for j in q_minus.keys()
-                for k in q.keys()])
-        X_plusY = sum([kernel(int(j[::-1], 2), int(k[::-1], 2)) * q_plus[j] * p[k] for j in q_plus.keys()
-                for k in p.keys()])
-        X_minusY = sum([kernel(int(j[::-1], 2), int(k[::-1], 2)) * q_minus[j] * p[k] for j in q_minus.keys()
-                for k in p.keys()])
+        X_plusX = kernel_mean(q_plus, q, gamma)
+        X_minusX = kernel_mean(q_minus, q, gamma)
+        X_plusY = kernel_mean(q_plus, p, gamma)
+        X_minusY = kernel_mean(q_minus, p, gamma)
 
-        X_h_plusX_h = sum([kernel(int(j[::-1], 2), int(k[::-1], 2)) * q_h_plus[j] * q_h[k] for j in q_h_plus.keys()
-                for k in q_h.keys()])
-        X_h_minusX_h = sum([kernel(int(j[::-1], 2), int(k[::-1], 2)) * q_h_minus[j] * q_h[k] for j in q_h_minus.keys()
-                for k in q_h.keys()])
-        X_h_plusY_h = sum([kernel(int(j[::-1], 2), int(k[::-1], 2)) * q_h_plus[j] * p_h[k] for j in q_h_plus.keys()
-                for k in p_h.keys()])
-        X_h_minusY_h = sum([kernel(int(j[::-1], 2), int(k[::-1], 2)) * q_h_minus[j] * p_h[k] for j in q_h_minus.keys()
-                for k in p_h.keys()])
+        X_h_plusX_h = kernel_mean(q_h_plus, q_h, gamma)
+        X_h_minusX_h = kernel_mean(q_h_minus, q_h, gamma)
+        X_h_plusY_h = kernel_mean(q_h_plus, p_h, gamma)
+        X_h_minusY_h = kernel_mean(q_h_minus, p_h, gamma)
 
         gradient = (X_plusX - X_minusX - X_plusY + X_minusY
                     + X_h_plusX_h - X_h_minusX_h - X_h_plusY_h + X_h_minusY_h) / 2
@@ -183,7 +207,7 @@ def gradient(q, p, q_h, p_h, parameters, parallelize=True):
         results = []
         manager = multiprocessing.Manager()
         return_dict = manager.dict()
-        num_processes = 8
+        num_processes = 12
         jobs = []
         r = np.array([x for x in range(num_params)])
         s = np.array_split(r, num_processes)
@@ -197,26 +221,29 @@ def gradient(q, p, q_h, p_h, parameters, parallelize=True):
         for i in range(num_processes):
             results.append(return_dict[i])
         results = np.array(results, dtype='float64').flatten()
+        print(results)
         return results
     else:
         r = np.array([x for x in range(num_params)])
         diff_gradients = gradient_block(q, p, q_h, p_h, parameters, r)
+        print(diff_gradients)
         return np.array(diff_gradients, dtype='float64')
 
-def gradient_descent(steps=50, lr=0.5):
+def gradient_descent(steps=100, lr=0.1):
     x = [np.pi / 2] * (num_params)
-
     # x = np.array(np.random.uniform(0, 2*np.pi, num_params))
+
+    adam = Adam(n_iter=steps, lr=lr)
+    adam.initialize_adam(x)
+
     model_distributions = []
     loss_func_vals = []
 
     q = run_circ(ansatz_qc, x)
     p = arr_to_dict(data)
-    # q_h = run_circ(h_ansatz_qc, x)
 
-    q_h = arr_to_dict(fwht(dict_to_arr(q)))
+    q_h = run_circ(h_ansatz_qc, x)
     p_h = arr_to_dict(fwht(data))
-
 
     loss_val = loss(q, p, q_h, p_h)
 
@@ -227,10 +254,12 @@ def gradient_descent(steps=50, lr=0.5):
     lowest = loss_val
     lowest_index = 0
     for i in range(steps):
-        x -= lr*gradient(q, p, q_h, p_h, x, parallelize=True)
+        grad = gradient(q, p, q_h, p_h, x, parallelize=True)
+        x = adam.update_parameters_with_adam(x, grad, i)
+
         q = run_circ(ansatz_qc, x)
-        # q_h = run_circ(h_ansatz_qc, x)
-        q_h = arr_to_dict(fwht(dict_to_arr(q)))
+        q_h = run_circ(h_ansatz_qc, x)
+
         loss_val = loss(q, p, q_h, p_h)
 
         if loss_val < lowest:
@@ -242,14 +271,23 @@ def gradient_descent(steps=50, lr=0.5):
 
         print(f"Loss value: {loss_val}")
     
+    best_dict = model_distributions[lowest_index]
+    temp = {}
+    for i in range(len(dict_to_arr(p))):
+        binary_string = ("{:0{width}b}".format(i, width=QPU_len))
+        if binary_string in best_dict:
+            temp[binary_string] = best_dict[binary_string]
+        else:
+            continue
     print(f"Best loss value: {lowest}")
-    print(f"Best model dist: {str(model_distributions[lowest_index])}")
+    print(f"Best model dist: {str(temp)}")
+    print('//////////////////////////////////////////////////////////')
     print(f"Target dist: {str(p)}")
 
-num_qubits = 6
-num_layers = 12
+num_qubits = QPU_len + 1
+num_layers = 8
 num_params = num_layers * num_qubits
-shots = 2 ** 12
+shots = 2 ** 14
 iteration = 0
 
 model_distributions = []
