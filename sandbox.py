@@ -6,23 +6,115 @@ from qiskit_ibm_runtime import EstimatorV2 as Estimator
 from qiskit import transpile
 import numpy as np
 from qiskit.circuit.library import RZGate, MCMT
+from qiskit.quantum_info.operators import Operator
+from qiskit.synthesis import synth_cnot_phase_aam
+import sys
+np.set_printoptions(threshold=sys.maxsize)
 
 def run_qc(shots, x_index_list):
 
-    cl = ClassicalRegister(4, 'cl1')
+    qc = QuantumCircuit(4)
 
-    qr = QuantumRegister(4, 'qr')
+    qc.x([1, 2, 3])
 
-    qc = QuantumCircuit(qr, cl)
-    rz = RZGate(0.25)
-    mcrz = MCMT(rz, 3, 1)
-    qc.append(mcrz, [3, 2, 1, 0])
+    qc.rx(np.pi/8, 0)
+    qc.cx(1, 0)
+    qc.rx(-np.pi/8, 0)
+    qc.cx(1, 0)
+
+    qc.barrier([x for x in range(4)])
+
+    qc.cx(2, 1)
+
+    qc.rx(-np.pi/8, 0)
+    qc.cx(1, 0)
+    qc.rx(np.pi/8, 0)
+    qc.cx(1, 0)
+
+    qc.barrier([x for x in range(4)])
+
+    qc.cx(2, 1)
+
+    qc.rx(np.pi/8, 0)
+    qc.cx(2, 0)
+    qc.rx(-np.pi/8, 0)
+    qc.cx(2, 0)
+
+    qc.barrier([x for x in range(4)])
+
+    qc.cx(3, 2)
+
+
+
+    qc.cx(1, 0)
+    qc.rx(-np.pi/8, 0)
+    qc.cx(1, 0)
+    qc.rx(np.pi/8, 0)
+
+    qc.barrier([x for x in range(4)])
+
+    qc.cx(2, 1)
+
+    qc.cx(1, 0)
+    qc.rx(np.pi/8, 0)
+    qc.cx(1, 0)
+    qc.rx(-np.pi/8, 0)
+
+    qc.barrier([x for x in range(4)])
+
+    qc.cx(2, 1)
+
+    qc.cx(2, 0)
+    qc.rx(-np.pi/8, 0)
+    qc.cx(2, 0)
+    qc.rx(np.pi/8, 0)
+
+    qc.barrier([x for x in range(4)])
+
+    qc.cx(3, 2)
+
+    qc.rx(np.pi/8, 0)
+    qc.cx(1, 0)
+    qc.rx(-np.pi/8, 0)
+    qc.cx(1, 0)
+
+    qc.barrier([x for x in range(4)])
+
+    qc.cx(3, 1)
+
+    qc.rx(-np.pi/8, 0)
+    qc.cx(1, 0)
+    qc.rx(np.pi/8, 0)
+    qc.cx(1, 0)
+
+    qc.barrier([x for x in range(4)])
+
+    qc.cx(3, 1)
+
+    qc.rx(np.pi/8, 0)
+    qc.cx(3, 0)
+    qc.rx(-np.pi/8, 0)
+    qc.cx(3, 0)
+
+    # print(transpile(qc, basis_gates=['cx', 'h', 'rx'], optimization_level=3))
+    # print('///////////')
+
+    # cnots = [[1, 1, 1, 1, 1, 1],
+    #                  [0, 1, 0, 1, 0, 0],
+    #                  [0, 0, 0, 1, 1, 0]]
+    # angles = [0.25/4, -0.25/4, -0.25/4, 0.25/4, 0.25/4, 0.25/4]
+    # print(synth_cnot_phase_aam(cnots, angles))
+    # qc2 = QuantumCircuit(4)
+    # rz = RZGate(0.25)
+    # mcrz = MCMT(rz, 3, 1)
+    # qc2.append(mcrz, [3, 2, 1, 0])
+    # print(Operator(transpile(qc2, basis_gates=['cx', 'h', 'rz'], optimization_level=3).to_gate()).to_matrix())
+    # exit()
     # qc.mcp(0.25, [3, 2, 1], 0)
-    print(transpile(qc, basis_gates=['cx', 'h', 'rz'], optimization_level=3))
-    exit()
+
     # qc.h(qr)
-    qc.initialize([1/(2*np.sqrt(2)), 1/2, 1/(2*np.sqrt(2)), 1/np.sqrt(2)], qc.qubits)
-    qc.h(x_index_list)
+    # qc.initialize([1/(2*np.sqrt(2)), 1/2, 1/(2*np.sqrt(2)), 1/np.sqrt(2)], qc.qubits)
+    # qc.h(x_index_list)
     qc.measure_all()
 
     aer_sim = AerSimulator()
@@ -37,9 +129,10 @@ def run_qc(shots, x_index_list):
     # with Session(backend=aer_sim) as session:
     #     sampler = Sampler(session=session)
     #     result = sampler.run([isa_qc], shots=2**16).result()
-
-
-    return result[0].data.meas.get_counts()
+    results = result[0].data.meas.get_counts()
+    print(results)
+    exit()
+    return results
 
 shots = 2**16
 
