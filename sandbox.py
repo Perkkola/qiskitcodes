@@ -10,59 +10,9 @@ from qiskit.quantum_info.operators import Operator
 from qiskit.synthesis import synth_cnot_phase_aam
 import sys
 from gray_synth import synth_cnot_phase_aam
+from functools import reduce
+
 np.set_printoptions(threshold=sys.maxsize)
-
-def crz_circ(circ, theta, control, target):
-    circ.rz(theta, target)
-    circ.cx(control, target)
-    circ.rz(-theta, target)
-    circ.cx(control, target)
-
-    # circ.cx(control, target)
-    # circ.rz(theta, target)
-    # circ.cx(control, target)
-    # circ.rz(-theta, target)
-    # circ.rz(-theta, control)
-    
-    # circ.p(theta, control)
-    # circ.cx(control, target)
-    # circ.p(-theta, target)
-    # circ.cx(control, target)
-    # circ.p(theta, target)
-
-
-
-def ncrz_circ(n_qubits, circ, theta, controls, target, iteration = 1):
-    if (len(controls) == 1):
-        crz_circ(circ, theta / 2, controls[0], target)
-    else:
-        ncrz_circ(n_qubits, circ, theta / 2, controls[1:], target + 1, iteration + 1)
-        # circ.barrier([x for x in range(n_qubits)])
-        ncrz_circ(n_qubits, circ, theta / 2, controls[1:], target, iteration + 1)
-        # circ.barrier([x for x in range(n_qubits)])
-        circ.cx(iteration, target)
-        # circ.cx(1, 0)
-        ncrz_circ(n_qubits, circ, -theta / 2, controls[1:], target, iteration + 1)
-        # circ.barrier([x for x in range(n_qubits)])
-        circ.cx(iteration, target)
-        # circ.cx(1, 0)
-
-def ncrz_circ2(n_qubits, circ, theta, controls, target, iteration = 0, long = False):
-    if (len(controls) == 1):
-        crz_circ(circ, theta / 2, controls[0], target)
-    else:
-        ncrz_circ2(n_qubits, circ, theta / 2, controls[:-1], target, iteration + 1)
-        circ.cx(controls[-1], controls[-2])
-        # circ.barrier([x for x in range(n_qubits)])
-
-
-        ncrz_circ2(n_qubits, circ, -theta / 2, controls[:-1], target, iteration + 1)
-        circ.cx(controls[-1], controls[-2])
-        # circ.barrier([x for x in range(n_qubits)])
-        # circ.cx(1, 0)
-        ncrz_circ2(n_qubits, circ, theta / 2, controls[1:], target, iteration + 1, True)
-        # circ.barrier([x for x in range(n_qubits)])
-        # circ.cx(iteration, target)
 
 def generate_cnots(arr):
     temp = []
@@ -80,9 +30,26 @@ def generate_thetas(arr):
     arr = np.append(arr, arr * -1)
     return arr.tolist()
 
+def flip_signs(cnots, thetas, x_index_list):
+    arr = np.copy(cnots).transpose().tolist()
+    for index, bit_list in enumerate(arr):
+        xor_list = [bit_list[x] for x in x_index_list]
+        xor_result = reduce(lambda a, b: a ^ b, xor_list)
+        if xor_result == 1: thetas[index] *= -1
+    return thetas
+
+def create_x_index_list(qubit_length):
+    x_index_list = []
+
+    for i in range(1, 2 ** qubit_length):
+        binary_string = ("{:0{width}b}".format(i, width=qubit_length))[::-1]
+        indices = [i + 1 for i, x in enumerate(binary_string) if x == '1']
+        x_index_list.append(indices)
+    return x_index_list
+
 def run_qc(shots, x_index_list):
 
-    # num_qubits = 3
+    num_qubits = 3
     # qc = QuantumCircuit(num_qubits)
     # qc.x([1, 2])
     # ncrz_circ2(num_qubits, qc, np.pi /2, [x for x in range(1,  num_qubits)], 0)
@@ -94,9 +61,22 @@ def run_qc(shots, x_index_list):
              [0, 1]]
     thetas = [theta/2, -theta/2]
 
-    thetas = generate_thetas(generate_thetas(thetas))
+    thetas = generate_thetas(thetas)
+    thetas_cp = np.copy(thetas)
     cnots = generate_cnots(generate_cnots(cnots))
-    print(np.array(cnots))
+    print(cnots)
+    exit()
+    # phase_sum_dict = create_phase_sum_dict(num_qubits - 1)
+    x_index_lists = create_x_index_list(num_qubits - 1)
+    for x_index_list in x_index_lists:
+        flipped_thetas = flip_signs(cnots, thetas_cp, x_index_list)
+        thetas = np.array(thetas) + np.array(flipped_thetas)
+    thetas = thetas.tolist()
+    # print(phase_sum_dict)
+    # print(x_index_lists)
+    # print(np.array(cnots))
+    # print(thetas)
+    # exit()
     # thetas[0] *= -1
     # thetas[2] *= -1
     # thetas[2] *= -1
@@ -105,11 +85,11 @@ def run_qc(shots, x_index_list):
     # print(thetas)
     # print(np.array(cnots))
     # exit()
-    qc = QuantumCircuit(4)
+    qc = QuantumCircuit(3)
     # qc.x([1, 2])
     gray_qc = synth_cnot_phase_aam(cnots, thetas)
     # print(gray_qc)
-    qc.append(gray_qc.to_gate(), [0 ,1, 2, 3])
+    qc.append(gray_qc.to_gate(), [0, 1, 2])
     # qc.x([1, 2])
     print(qc.decompose())
     # exit()

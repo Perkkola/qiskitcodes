@@ -7,19 +7,21 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import mean_squared_error
 from scipy import optimize
+from functools import reduce
 
-data = [1, 2, 3, 4, 5, 6, 7, 8]
+s = np.array([1, 2, 3])
+v = np.array([1, 2 ,3])
 
-squareSum = 0
+bit_list = [1, 0, 1]
+x_index_list = [1, 2, 3]
+print(bit_list[:-1])
+exit()
 
-for el in data:
-    squareSum += np.square(el)
+print([bit_list[x] for x in x_index_list])
+print(reduce(lambda a, b: a ^ b, bit_list))
 
-squareSum = np.sqrt(squareSum)
-data = data / squareSum
 
-for i in range(len(data)):
-       data[i] = np.square(data[i])
+exit()
 
 p = ParameterVector('p', 9)
 

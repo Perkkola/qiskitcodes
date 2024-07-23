@@ -26,51 +26,137 @@ from qiskit_ibm_runtime import Session, SamplerV2 as Sampler
 from qiskit_ibm_runtime import EstimatorV2 as Estimator
 from qiskit_ibm_runtime.options import ExecutionOptions, Options
 from qiskit.quantum_info import DensityMatrix,partial_trace, SparsePauliOp
+from gray_synth import synth_cnot_phase_aam
+import sys
+np.set_printoptions(threshold=sys.maxsize)
+
+def generate_cnots(arr):
+    temp = []
+    arr = np.array(arr).transpose().tolist()
+    for i in range(2):
+        for a in arr:
+            cp = np.copy(a).tolist()
+            cp.append(i)
+            temp.append(cp)
+
+    return np.array(temp).transpose().tolist()
+
+def generate_thetas(arr):
+    arr = np.array(arr) / 2
+    arr = np.append(arr, arr * -1)
+    return arr.tolist()
+
+def flip_signs(cnots, thetas, x_index_list):
+    arr = np.copy(cnots).transpose().tolist()
+    for index, bit_list in enumerate(arr):
+        xor_list = [bit_list[x] for x in x_index_list]
+        xor_result = reduce(lambda a, b: a ^ b, xor_list)
+        if xor_result == 1: thetas[index] *= -1
+    return thetas
+
+
+def create_phase_x_index_list(qubit_length):
+    x_index_list = []
+
+    for i in range(1, 2 ** qubit_length):
+        binary_string = ("{:0{width}b}".format(i, width=qubit_length))[::-1]
+        indices = [i + 1 for i, x in enumerate(binary_string) if x == '1']
+        x_index_list.append(indices)
+    return x_index_list
 
 #This is the unitary for endocing the data in the binary encoded data approach. See paper for reference
 def createU_k(circuit, data_arr):
-    for i in range(len(data_arr)):
-        bit_string = ("{:0{width}b}".format(i, width=QPU_len))[::-1]
-        x_index_list = [i + 2 for i, x in enumerate(bit_string) if x == '0']
-        mcrz_index_list = [x + 2 for x in range(QPU_len)]
-        mcrz_index_list.append(0)
-        for j in range(2):
-            if len(x_index_list) > 0: circuit.x(x_index_list)
-            if j == 0:
-                rz = RZGate(data[i] * 2)
-                mcrz = MCMT(rz, QPU_len, 1)
-                circuit.append(mcrz, mcrz_index_list)
-                # circuit.mcp(data_arr[i], [x + 1 for x in range(QPU_len)], 0)
-                # # circuit.mcx([x + 1 for x in range(QPU_len)], 0)
-                # circuit.x(0)
-                # circuit.mcp(-data_arr[i], [x + 1 for x in range(QPU_len)], 0)
-                # circuit.x(0)
-                # # circuit.mcx([x + 1 for x in range(QPU_len)], 0)
+    cnots = [[1, 1],
+             [0, 1]]
+    all_thetas = []
+    for _ in range(QPU_len - 1):
+        cnots = generate_cnots(cnots)
+    
+    for theta in data_arr:
+        thetas = [theta/2, -theta/2]
+        for _ in range(QPU_len - 1):
+            thetas = generate_thetas(thetas)
+        all_thetas.append(thetas)
 
-        circuit.barrier([x for x in range(QPU_len + 2)])
+
+    thetas = np.copy(all_thetas[-1])
+    x_phase_index_lists = create_phase_x_index_list(QPU_len)[::-1]
+
+    for thetas_cp, x_index_list in zip(all_thetas[:-1], x_phase_index_lists):
+        flipped_thetas = flip_signs(cnots, np.copy(thetas_cp), x_index_list)
+        thetas = np.array(thetas) + np.array(flipped_thetas)
+    thetas = thetas.tolist()
+
+    gray_qc = synth_cnot_phase_aam(cnots, thetas)
+    circuit.append(gray_qc.to_gate(), [x for x in range(QPU_len + 2) if x != 1])
+    circuit.barrier([x for x in range(QPU_len + 2)])
+
+    # for i in range(len(data_arr)):
+    #     bit_string = ("{:0{width}b}".format(i, width=QPU_len))[::-1]
+    #     x_index_list = [i + 2 for i, x in enumerate(bit_string) if x == '0']
+    #     mcrz_index_list = [x + 2 for x in range(QPU_len)]
+    #     mcrz_index_list.append(0)
+    #     for j in range(2):
+    #         if len(x_index_list) > 0: circuit.x(x_index_list)
+    #         if j == 0:
+    #             rz = RZGate(data[i] * 2)
+    #             mcrz = MCMT(rz, QPU_len, 1)
+    #             circuit.append(mcrz, mcrz_index_list)
+    #             # circuit.mcp(data_arr[i], [x + 1 for x in range(QPU_len)], 0)
+    #             # # circuit.mcx([x + 1 for x in range(QPU_len)], 0)
+    #             # circuit.x(0)
+    #             # circuit.mcp(-data_arr[i], [x + 1 for x in range(QPU_len)], 0)
+    #             # circuit.x(0)
+    #             # # circuit.mcx([x + 1 for x in range(QPU_len)], 0)
+
+    #     circuit.barrier([x for x in range(QPU_len + 2)])
+
 
         
 #This is the unitary for regression coefficients.
 def createU_m(circuit, col_reg, phi_array):
-    for i in range(len(phi_array)):
-        bit_string = ("{:0{width}b}".format(i, width=N_M))[::-1]
-        x_index_list = [i + 2 for i, x in enumerate(bit_string) if x == '0']
-        mcrz_index_list = [x + 2 for x in range(N_M)]
-        mcrz_index_list.append(1)
-        for j in range(2):
-            if len(x_index_list) > 0: circuit.x(x_index_list)
-            if j == 0:
-                rz = RZGate(-phi_array[i] * 2)
-                mcrz = MCMT(rz, N_M, 1)
-                circuit.append(mcrz, mcrz_index_list)
-                # circuit.mcp(-phi_array[i], col_reg, 0)
-                # # circuit.mcx(col_reg, 0)
-                # circuit.x(0)
-                # circuit.mcp(phi_array[i], col_reg, 0)
-                # # circuit.mcx(col_reg, 0)
-                # circuit.x(0)
- 
-        circuit.barrier([x for x in range(QPU_len + 2)])
+    global N_M
+    # for i in range(len(phi_array)):
+    #     bit_string = ("{:0{width}b}".format(i, width=N_M))[::-1]
+    #     x_index_list = [i + 2 for i, x in enumerate(bit_string) if x == '0']
+    #     mcrz_index_list = [x + 2 for x in range(N_M)]
+    #     mcrz_index_list.append(1)
+    #     for j in range(2):
+    #         if len(x_index_list) > 0: circuit.x(x_index_list)
+    #         if j == 0:
+    #             rz = RZGate(-phi_array[i] * 2)
+    #             mcrz = MCMT(rz, N_M, 1)
+    #             circuit.append(mcrz, mcrz_index_list)
+    #             # circuit.mcp(-phi_array[i], col_reg, 0)
+    #             # # circuit.mcx(col_reg, 0)
+    #             # circuit.x(0)
+    #             # circuit.mcp(phi_array[i], col_reg, 0)
+    #             # # circuit.mcx(col_reg, 0)
+    #             # circuit.x(0)
+    cnots = [[1, 1],
+             [0, 1]]
+    all_thetas = []
+    for _ in range(N_M - 1):
+        cnots = generate_cnots(cnots)
+    
+    for theta in phi_array:
+        thetas = [-theta/2, theta/2]
+        for _ in range(N_M - 1):
+            thetas = generate_thetas(thetas)
+        all_thetas.append(thetas)
+
+
+    thetas = np.copy(all_thetas[-1])
+    x_phase_index_lists = create_phase_x_index_list(N_M)[::-1]
+    
+    for thetas_cp, x_index_list in zip(all_thetas[:-1], x_phase_index_lists):
+        flipped_thetas = flip_signs(cnots, np.copy(thetas_cp), x_index_list)
+        thetas = np.array(thetas) + np.array(flipped_thetas)
+    thetas = thetas.tolist()
+
+    gray_qc = synth_cnot_phase_aam(cnots, thetas)
+    circuit.append(gray_qc.to_gate(), [x for x in range(1, N_M + 2)])
+    circuit.barrier([x for x in range(QPU_len + 2)])
 
 
 
@@ -194,6 +280,7 @@ def run_circuit(phi):
 
     psi.h([x for x in range(QPU_len + 2)])
     createU_k(psi, estimated)
+
     psi.h(ar[0])
 
     createU_m(psi, col_reg, phi)
@@ -208,6 +295,8 @@ def run_circuit(phi):
     for i in range(N_M):
         psi.measure(col_reg[i], cr[i + 2])
 
+    # print(psi.decompose())
+    # exit()
 
     aer_sim = AerSimulator()
     pm = generate_preset_pass_manager(backend=aer_sim, optimization_level=1)
@@ -236,7 +325,7 @@ def calc_expval(phi):
 init = [np.pi / 2]  * (2 ** N_M - 1)
 init.insert(0, 3 * np.pi / 4, ) #Initial parameters
 # init = [3.36172813, 1.57079631, 1.57079679, 0.22012573]
-# init = [np.pi, np.pi / 2, np.pi / 2, 0]
+init = [np.pi, np.pi / 2, np.pi / 2, 0]
 # init = [np.pi, np.pi, 0, 0]
 bounds = [(-np.pi, np.pi)] * (2 ** N_M - 1)
 bounds.insert(0, ( np.pi / 2, 3 * np.pi / 2))
