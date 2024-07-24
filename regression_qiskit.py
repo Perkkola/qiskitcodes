@@ -48,6 +48,7 @@ def generate_thetas(arr):
 
 def flip_signs(cnots, thetas, x_index_list):
     arr = np.copy(cnots).transpose().tolist()
+    thetas = np.copy(thetas)
     for index, bit_list in enumerate(arr):
         xor_list = [bit_list[x] for x in x_index_list]
         xor_result = reduce(lambda a, b: a ^ b, xor_list)
@@ -78,12 +79,11 @@ def createU_k(circuit, data_arr):
             thetas = generate_thetas(thetas)
         all_thetas.append(thetas)
 
-
     thetas = np.copy(all_thetas[-1])
     x_phase_index_lists = create_phase_x_index_list(QPU_len)[::-1]
 
-    for thetas_cp, x_index_list in zip(all_thetas[:-1], x_phase_index_lists):
-        flipped_thetas = flip_signs(cnots, np.copy(thetas_cp), x_index_list)
+    for thetas_cp, x_phase_index_list in zip(all_thetas[:-1], x_phase_index_lists):
+        flipped_thetas = flip_signs(cnots, np.copy(thetas_cp), x_phase_index_list)
         thetas = np.array(thetas) + np.array(flipped_thetas)
     thetas = thetas.tolist()
 
@@ -140,20 +140,20 @@ def createU_m(circuit, col_reg, phi_array):
         cnots = generate_cnots(cnots)
     
     for theta in phi_array:
-        thetas = [-theta/2, theta/2]
+        thetas = [theta/2, -theta/2]
         for _ in range(N_M - 1):
             thetas = generate_thetas(thetas)
         all_thetas.append(thetas)
 
-
     thetas = np.copy(all_thetas[-1])
     x_phase_index_lists = create_phase_x_index_list(N_M)[::-1]
-    
-    for thetas_cp, x_index_list in zip(all_thetas[:-1], x_phase_index_lists):
-        flipped_thetas = flip_signs(cnots, np.copy(thetas_cp), x_index_list)
+    for thetas_cp, x_phase_index_list in zip(all_thetas[:-1], x_phase_index_lists):
+        flipped_thetas = flip_signs(cnots, np.copy(thetas_cp), x_phase_index_list)
         thetas = np.array(thetas) + np.array(flipped_thetas)
+    thetas *= -1
     thetas = thetas.tolist()
-
+    # print(thetas)
+    # exit()
     gray_qc = synth_cnot_phase_aam(cnots, thetas)
     circuit.append(gray_qc.to_gate(), [x for x in range(1, N_M + 2)])
     circuit.barrier([x for x in range(QPU_len + 2)])

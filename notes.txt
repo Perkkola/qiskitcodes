@@ -1,0 +1,4 @@
+-My version of constructing works, tested up to 7 qubits.
+-Phase polynomial flipping work correctly (even on isolated ancillae)
+-Phase folding should work (tested)
+-Creating U_k sohuldbe working correctly

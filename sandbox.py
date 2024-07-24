@@ -32,6 +32,7 @@ def generate_thetas(arr):
 
 def flip_signs(cnots, thetas, x_index_list):
     arr = np.copy(cnots).transpose().tolist()
+    thetas = np.copy(thetas)
     for index, bit_list in enumerate(arr):
         xor_list = [bit_list[x] for x in x_index_list]
         xor_result = reduce(lambda a, b: a ^ b, xor_list)
@@ -61,17 +62,21 @@ def run_qc(shots, x_index_list):
              [0, 1]]
     thetas = [theta/2, -theta/2]
 
-    thetas = generate_thetas(thetas)
-    thetas_cp = np.copy(thetas)
-    cnots = generate_cnots(generate_cnots(cnots))
-    print(cnots)
-    exit()
-    # phase_sum_dict = create_phase_sum_dict(num_qubits - 1)
-    x_index_lists = create_x_index_list(num_qubits - 1)
-    for x_index_list in x_index_lists:
-        flipped_thetas = flip_signs(cnots, thetas_cp, x_index_list)
-        thetas = np.array(thetas) + np.array(flipped_thetas)
+    thetas = generate_thetas(generate_thetas(generate_thetas(generate_thetas(thetas))))
+    cnots = generate_cnots(generate_cnots(generate_cnots(generate_cnots(cnots))))
+    # thetas_cp = np.copy(thetas)
+    x_lsit = [1, 2, 3, 4, 5]
+    thetas = flip_signs(cnots, thetas, x_lsit)
     thetas = thetas.tolist()
+    # x_index_lists = create_x_index_list(num_qubits - 1)[::-1]
+
+    # thetas_sum = np.copy(thetas)
+    # for x_index_list in x_index_lists:
+    #     flipped_thetas = flip_signs(cnots, thetas_cp, x_index_list)
+    #     # all_thetas.append(flipped_thetas)
+    #     thetas_sum = np.array(thetas_sum) + np.array(flipped_thetas)
+    # thetas_sum = thetas_sum.tolist()
+    # all_thetas.append(thetas_cp)
     # print(phase_sum_dict)
     # print(x_index_lists)
     # print(np.array(cnots))
@@ -85,30 +90,52 @@ def run_qc(shots, x_index_list):
     # print(thetas)
     # print(np.array(cnots))
     # exit()
-    qc = QuantumCircuit(3)
-    # qc.x([1, 2])
+    qc = QuantumCircuit(7)
+    # qc.h([x for x in range(3)])
     gray_qc = synth_cnot_phase_aam(cnots, thetas)
-    # print(gray_qc)
-    qc.append(gray_qc.to_gate(), [0, 1, 2])
-    # qc.x([1, 2])
+    qc.append(gray_qc.to_gate(), [0, 2, 3, 4, 5, 6])
     print(qc.decompose())
     # exit()
-    print(Operator(transpile(qc, basis_gates=['cx', 'h', 'rz'], optimization_level=1).to_gate()).to_matrix())
+    print(np.array(Operator(transpile(qc, basis_gates=['cx', 'h', 'x', 'rz'], optimization_level=1).to_gate()).to_matrix()))
+    # exit()
+    print('///////////')
+
+
+
+
+
+
+    qc2 = QuantumCircuit(7)
+    rz = RZGate(2 * np.pi)
+    mcrz = MCMT(rz, 5, 1)
+
+    # qc2.h([x for x in range(3)])
+    qc2.x([2, 3, 4, 5, 6])
+    qc2.append(mcrz, [6, 5, 4, 3, 2, 0])
+    qc2.x([2, 3, 4, 5, 6])
+
+    # qc2.x([2])
+    # qc2.append(mcrz, [2, 1, 0])
+    # qc2.x([2])
+
+    # qc2.x([1])
+    # qc2.append(mcrz, [2, 1, 0])
+    # qc2.x([1])
+
+    # qc2.append(mcrz, [2, 1, 0])
+    print(transpile(qc2, basis_gates=['cx', 'h', 'x', 'rz'], optimization_level=3))
+    print(np.array(Operator(transpile(qc2, basis_gates=['cx', 'h', 'x', 'rz'], optimization_level=1).to_gate()).to_matrix()))
     exit()
     print('///////////')
-    qc2 = QuantumCircuit(3)
-    # qc2.x([1,2])
-    # rz = PhaseGate(np.pi/8)
-    rz = RZGate(2 * np.pi)
-    mcrz = MCMT(rz, 2, 1)
-    qc2.append(mcrz, [2, 1, 0])
-    # print(qc2)
-    # print(transpile(qc2, basis_gates=['cx', 'h', 'rz'], optimization_level=3))
-    # exit()
-    print(Operator(transpile(qc2, basis_gates=['cx', 'h', 'rz'], optimization_level=1).to_gate()).to_matrix())
-    # qc3 = QuantumCircuit(2)
+    qc3 = QuantumCircuit(2)
+    qc3.cx(1, 0)
+    qc3.rz(np.pi, 0)
+    qc3.cx(1, 0)
+    qc3.rz(-np.pi, 0)
+    qc3.rz(-np.pi, 1)
+    print(qc3)
     # qc3.cz(1, 0)
-    # print(Operator(transpile(qc3, basis_gates=['cx', 'h', 'rz'], optimization_level=1).to_gate()).to_matrix())
+    print(Operator(transpile(qc3, basis_gates=['cx', 'h', 'rz'], optimization_level=1).to_gate()).to_matrix())
     exit()
     # qc.mcp(0.25, [3, 2, 1], 0)
 
