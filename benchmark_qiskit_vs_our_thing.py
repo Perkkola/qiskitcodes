@@ -115,55 +115,69 @@ for i in range(1, 11):
 
     data = npr.uniform(0, 2*np.pi, 2 ** QPU_len)
 
-    # ar1 = AncillaRegister(1, 'ancilla1')
-    # qpu1 = QuantumRegister(QPU_len, 'QPU1')
-    # cl1 = ClassicalRegister(1, 'cl1')
-    # qc1 = QuantumCircuit(ar1, qpu1, cl1)
+    ar1 = AncillaRegister(1, 'ancilla1')
+    qpu1 = QuantumRegister(QPU_len, 'QPU1')
+    cl1 = ClassicalRegister(1, 'cl1')
+    qc1 = QuantumCircuit(ar1, qpu1, cl1)
 
-    ar2 = AncillaRegister(1, 'ancilla2')
-    qpu2 = QuantumRegister(QPU_len, 'QPU2')
-    cl2 = ClassicalRegister(1, 'cl2')
-    qc2 = QuantumCircuit(ar2, qpu2, cl2)
+    # ar2 = AncillaRegister(1, 'ancilla2')
+    # qpu2 = QuantumRegister(QPU_len, 'QPU2')
+    # cl2 = ClassicalRegister(1, 'cl2')
+    # qc2 = QuantumCircuit(ar2, qpu2, cl2)
 
-    # qpu3 = QuantumRegister(QPU_len)
-    # qc3 = QuantumCircuit(qpu3)
+    qpu3 = QuantumRegister(QPU_len)
+    qc3 = QuantumCircuit(qpu3)
 
-    # qc1.h([x for x in range(QPU_len + 1)])
-    qc2.h([x for x in range(QPU_len + 1)])
+    qc1.h([x for x in range(QPU_len + 1)])
+    # qc2.h([x for x in range(QPU_len + 1)])
 
     estimated = np.copy(data)
 
-    # create_circ_phase_folding(qc1, estimated)
-    # qc3.prepare_state(estimated, qpu3, normalize=True)
-    create_circ_qiskit(qc2, estimated)
+    create_circ_phase_folding(qc1, estimated)
+    qc3.prepare_state(estimated, qpu3, normalize=True)
+    # create_circ_qiskit(qc2, estimated)
 
-    # qc1.h(ar1[0])
-    qc2.h(ar2[0])
 
-    # qc1.measure(ar1[0], cl1[0])
-    qc2.measure(ar2[0], cl2[0])
-
-    # qc1 = transpile(qc1, basis_gates=['cx', 'h', 'x', 'rz'], optimization_level=3)
-    qc2 = transpile(qc2, basis_gates=['cx', 'h', 'x', 'rz'], optimization_level=3)
     # qc3 = transpile(qc3, basis_gates=['cx', 'h', 'x', 'rz'], optimization_level=3)
+    # print(qc3)
+    qc1.h(ar1[0])
+    # qc2.h(ar2[0])
+
+    qc1.measure(ar1[0], cl1[0])
+    # qc2.measure(ar2[0], cl2[0])
+
+    qc1 = transpile(qc1, basis_gates=['cx', 'h', 'x', 'rz', 'ry'], optimization_level=3)
+    # qc2 = transpile(qc2, basis_gates=['cx', 'h', 'x', 'rz'], optimization_level=3)
+    qc3 = transpile(qc3, basis_gates=['cx', 'h', 'x', 'rz', 'ry'], optimization_level=3)
+    
 
 
-    # qc1_ops = qc1.count_ops()
-    qc2_ops = qc2.count_ops()
-    # qc3_ops = qc3.count_ops()
-    print(qc2_ops)
+    qc1_ops = qc1.count_ops()
+    # qc2_ops = qc2.count_ops()
+    qc3_ops = qc3.count_ops()
+    # print(qc2_ops)
     # qc1_cx = qc1_ops['cx']
     # qc2_cx = qc2_ops['cx']
-    qc2_cx = qc2_ops['cx'] if 'cx' in qc2_ops else 0
-    qc2_rz = qc2_ops['rz'] if 'rz' in qc2_ops else 0 
-    qc2_h = qc2_ops['h'] if 'h' in qc2_ops else 0
-    qc2_x = qc2_ops['x'] if 'x' in qc2_ops else 0
-    qc2_meas = qc2_ops['measure'] if 'measure' in qc2_ops else 0
+    qc1_cx = qc1_ops['cx'] if 'cx' in qc1_ops else 0
+    qc1_rz = qc1_ops['rz'] if 'rz' in qc1_ops else 0 
+    qc1_h = qc1_ops['h'] if 'h' in qc1_ops else 0
+    qc1_x = qc1_ops['x'] if 'x' in qc1_ops else 0
+    qc1_ry = qc1_ops['ry'] if 'ry' in qc1_ops else 0
+    qc1_meas = qc1_ops['measure'] if 'measure' in qc1_ops else 0
+
+    qc3_cx = qc3_ops['cx'] if 'cx' in qc3_ops else 0
+    qc3_rz = qc3_ops['rz'] if 'rz' in qc3_ops else 0 
+    qc3_h = qc3_ops['h'] if 'h' in qc3_ops else 0
+    qc3_x = qc3_ops['x'] if 'x' in qc3_ops else 0
+    qc3_ry = qc3_ops['ry'] if 'ry' in qc3_ops else 0
+    qc3_meas = qc3_ops['measure'] if 'measure' in qc3_ops else 0
 
     # qc1_all = qc1_ops['cx'] + qc1_ops['rz'] + qc1_ops['h'] + qc1_ops['measure']
     # qc2_all = qc2_ops['cx'] + qc2_ops['rz'] + qc2_ops['h'] + qc2_ops['measure']
     # qc3_all = qc3_cx + qc3_h + qc3_rz + qc3_x
-    qc2_all = qc2_cx + qc2_h + qc2_rz + qc2_x
+    qc1_all = qc1_cx + qc1_h + qc1_rz + qc1_x + qc1_meas + qc1_ry
+    qc3_all = qc3_cx + qc3_h + qc3_rz + qc3_x + qc3_meas + qc3_ry
     
-    print(f"qc2 cx count: {qc2_cx}, all ops: {qc2_all} for dataset size: {2 ** QPU_len}")
+    print(f"qc1 cx count: {qc1_cx}, all ops: {qc1_all} for dataset size: {2 ** QPU_len}")
+    print(f"qc3 cx count: {qc3_cx}, all ops: {qc3_all} for dataset size: {2 ** QPU_len}")
     # print(f"qc2 cx count: {qc2_cx}, all ops: {qc2_all} for dataset size: {2 ** QPU_len}")

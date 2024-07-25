@@ -67,15 +67,14 @@ def create_phase_x_index_list(qubit_length):
 
 #This is the unitary for endocing the data in the binary encoded data approach. See paper for reference
 def createU_k(circuit, data_arr):
-    cnots = [[1, 1],
-             [0, 1]]
+    cnots = [[1]]
     all_thetas = []
-    for _ in range(QPU_len - 1):
+    for _ in range(QPU_len):
         cnots = generate_cnots(cnots)
     
     for theta in data_arr:
-        thetas = [theta/2, -theta/2]
-        for _ in range(QPU_len - 1):
+        thetas = [2 * theta]
+        for _ in range(QPU_len):
             thetas = generate_thetas(thetas)
         all_thetas.append(thetas)
 
@@ -114,7 +113,7 @@ def createU_k(circuit, data_arr):
 
         
 #This is the unitary for regression coefficients.
-def createU_m(circuit, col_reg, phi_array):
+def createU_m(circuit, phi_array):
     global N_M
     # for i in range(len(phi_array)):
     #     bit_string = ("{:0{width}b}".format(i, width=N_M))[::-1]
@@ -133,15 +132,14 @@ def createU_m(circuit, col_reg, phi_array):
     #             # circuit.mcp(phi_array[i], col_reg, 0)
     #             # # circuit.mcx(col_reg, 0)
     #             # circuit.x(0)
-    cnots = [[1, 1],
-             [0, 1]]
+    cnots = [[1]]
     all_thetas = []
-    for _ in range(N_M - 1):
+    for _ in range(N_M):
         cnots = generate_cnots(cnots)
     
     for theta in phi_array:
-        thetas = [theta/2, -theta/2]
-        for _ in range(N_M - 1):
+        thetas = [2 * theta]
+        for _ in range(N_M):
             thetas = generate_thetas(thetas)
         all_thetas.append(thetas)
 
@@ -150,15 +148,13 @@ def createU_m(circuit, col_reg, phi_array):
     for thetas_cp, x_phase_index_list in zip(all_thetas[:-1], x_phase_index_lists):
         flipped_thetas = flip_signs(cnots, np.copy(thetas_cp), x_phase_index_list)
         thetas = np.array(thetas) + np.array(flipped_thetas)
+
     thetas *= -1
     thetas = thetas.tolist()
-    # print(thetas)
-    # exit()
+
     gray_qc = synth_cnot_phase_aam(cnots, thetas)
     circuit.append(gray_qc.to_gate(), [x for x in range(1, N_M + 2)])
     circuit.barrier([x for x in range(QPU_len + 2)])
-
-
 
 #The measurement operator
 def create_x_index_list():
@@ -232,7 +228,6 @@ data = np.empty((l, m))
 
 for i in range(l):
     data[i] = np.flip(np.append(X[i], y[i]))
-    # data[i] = np.append(y[i], X[i])
 
 squareSum = 0
 data = data.transpose()
@@ -253,37 +248,29 @@ for i in range(l):
     dataPadded[i] = np.append(data[i], [0] * (int(2**N_M - m)))
 
 data = dataPadded.flatten()
-shots = 2 ** 14
+shots = 2 ** 16
 print(QPU_len)
 
 x_index_list = create_x_index_list()
+###################################### CIRCUIT
+ar = AncillaRegister(2, 'ancilla')
+row_reg = QuantumRegister(N_L, 'l')
+col_reg = QuantumRegister(N_M, 'm')
+cr = ClassicalRegister(N_M + 2, 'cr')
 
-class RemoveResets(TransformationPass):
-    def run(self, dag):
-        for node in dag.op_nodes():
-            if node.op.name == 'reset':
-                
-                dag.remove_op_node(node)
-        return dag
+qc = QuantumCircuit(ar, col_reg, row_reg,  cr)
 
+estimated = np.copy(data)
+
+qc.h([x for x in range(QPU_len + 2)])
+createU_k(qc, estimated)
+
+qc.h(ar[0])
+#####################################################
 #Function for NM optimizer
 def run_circuit(phi):
-    ar = AncillaRegister(2, 'ancilla')
-    row_reg = QuantumRegister(N_L, 'l')
-    col_reg = QuantumRegister(N_M, 'm')
-    cr = ClassicalRegister(N_M + 2, 'cr')
-
-    psi = QuantumCircuit(ar, col_reg, row_reg,  cr)
-
-
-    estimated = np.copy(data)
-
-    psi.h([x for x in range(QPU_len + 2)])
-    createU_k(psi, estimated)
-
-    psi.h(ar[0])
-
-    createU_m(psi, col_reg, phi)
+    psi = qc.copy()
+    createU_m(psi, phi)
     psi.h(ar[1])
     psi.barrier([x for x in range(QPU_len + 2)])
 
@@ -295,8 +282,9 @@ def run_circuit(phi):
     for i in range(N_M):
         psi.measure(col_reg[i], cr[i + 2])
 
-    # print(psi.decompose())
-    # exit()
+    print(psi.decompose())
+    print(psi.decompose().count_ops())
+    exit()
 
     aer_sim = AerSimulator()
     pm = generate_preset_pass_manager(backend=aer_sim, optimization_level=1)
@@ -325,7 +313,7 @@ def calc_expval(phi):
 init = [np.pi / 2]  * (2 ** N_M - 1)
 init.insert(0, 3 * np.pi / 4, ) #Initial parameters
 # init = [3.36172813, 1.57079631, 1.57079679, 0.22012573]
-init = [np.pi, np.pi / 2, np.pi / 2, 0]
+# init = [np.pi, np.pi / 2, np.pi / 2, 0]
 # init = [np.pi, np.pi, 0, 0]
 bounds = [(-np.pi, np.pi)] * (2 ** N_M - 1)
 bounds.insert(0, ( np.pi / 2, 3 * np.pi / 2))
@@ -339,3 +327,10 @@ print(res.message)
     #     if("{:0{width}b}".format(i, width=QPU_len) not in states): statesWithIndex.append(("{:0{width}b}".format(i, width=QPU_len), 0))
     #     service = QiskitRuntimeService(channel='ibm_quantum',token='8b7dbd957b8397e509a9b18af70f77a2853e7f9ef6a7cec345300e9e530f654061389b4ddfb86d9668cffe36379349f2d6c6d3a470609f927b423b66fac16254')
 
+class RemoveResets(TransformationPass):
+    def run(self, dag):
+        for node in dag.op_nodes():
+            if node.op.name == 'reset':
+                
+                dag.remove_op_node(node)
+        return dag

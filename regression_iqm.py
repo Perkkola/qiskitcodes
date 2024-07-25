@@ -20,6 +20,7 @@ from qiskit import execute
 from qiskit.tools.monitor import job_monitor
 
 from iqm.qiskit_iqm import IQMProvider
+
 np.set_printoptions(threshold=sys.maxsize)
 
 # from iqm.qiskit_iqm.fake_backends import fake_apollo, fake_adonis
@@ -128,23 +129,23 @@ os.environ["IQM_TOKEN"] = "Dbbsj2DrKgei0cm489FomBmg6zpAQZOuyTeTpwu0xO0GZ6s4ZhZ3g
 provider=IQMProvider(url="https://cocos.resonance.meetiqm.com/garnet:mock")
 backend = provider.get_backend()
 
-# X = np.array([[-0.32741112, -0.11288069,  0.49650164],
-#        [-0.94268847, -0.78149813, -0.49440176],
-#        [ 0.68523899,  0.61829019, -1.32935529],
-#        [-1.25647971, -0.14910498, -0.25044557],
-#        [ 1.66252391, -0.78480779,  1.79644309],
-#        [ 0.42989295,  0.45376306,  0.21658276],
-#        [-0.61965493, -0.39914738, -0.33494265],
-#        [-0.54552144,  1.85889336,  0.67628493]])
+X = np.array([[-0.32741112, -0.11288069,  0.49650164],
+       [-0.94268847, -0.78149813, -0.49440176],
+       [ 0.68523899,  0.61829019, -1.32935529],
+       [-1.25647971, -0.14910498, -0.25044557],
+       [ 1.66252391, -0.78480779,  1.79644309],
+       [ 0.42989295,  0.45376306,  0.21658276],
+       [-0.61965493, -0.39914738, -0.33494265],
+       [-0.54552144,  1.85889336,  0.67628493]])
 
-# y = np.array([ -8.02307406, -23.10019118,  16.79149797, -30.78951577,
-#         40.73946101,  10.53434892, -15.18438779, -13.3677773 ])
-df = pd.read_csv("./Admission_Predict.csv")
+y = np.array([ -8.02307406, -23.10019118,  16.79149797, -30.78951577,
+        40.73946101,  10.53434892, -15.18438779, -13.3677773 ])
+# df = pd.read_csv("./Admission_Predict.csv")
 
-X = np.array(df.iloc[:,1:-1])
-y = np.array(df.iloc[:,-1])
+# X = np.array(df.iloc[:,1:-1])
+# y = np.array(df.iloc[:,-1])
 
-X, X_test, y, y_test = train_test_split(X, y, test_size=0.36, random_state=42)
+# X, X_test, y, y_test = train_test_split(X, y, test_size=0.36, random_state=42)
 
 
 l = len(X) #Rows
@@ -154,7 +155,7 @@ data = np.empty((l, m))
 for i in range(l):
     data[i] = np.flip(np.append(X[i], y[i])) #Reverse the data order
 
-numBatches = 16 #Number of batches
+numBatches = 1 #Number of batches
 batchSize = int(np.ceil(l / numBatches))
 
 data = [data[i:i + batchSize] for i in range(0, len(data), batchSize)]
@@ -256,24 +257,29 @@ def run_circuit(phi, batched_data):
     pm = PassManager([RemoveResets()]) 
     psi_no_resets = pm.run(psi)
 
-    print(psi_no_resets.count_ops())
-    job = execute(psi_no_resets, backend, shots=shots)
-    # qc_transpiled = transpile(psi_no_resets, backend=backend, layout_method='sabre', optimization_level=1)
-    # print(qc_transpiled.draw(output='text', idle_wires=False))
-    # exit()
+    # print(psi_no_resets.count_ops())
+    qc_transpiled = transpile(psi_no_resets, backend=backend, optimization_level=3)
+    print(qc_transpiled.count_ops())
+    job = execute(qc_transpiled, backend, shots=shots) 
+ 
     job_monitor(job)
 
     res=job.result()
     counts=res.get_counts()
     # print(backend.error_profile)
     return counts
-    # print(transpiled_circuit)
+
+
+
+    # print(psi_no_resets)
     # aer_sim = AerSimulator()
     # pm = generate_preset_pass_manager(backend=aer_sim, optimization_level=3)
-    # isa_qc = pm.run(psi)
+    # isa_qc = pm.run(psi_no_resets)
 
-    # print(isa_qc.depth())
-    # exit()
+    # # print(isa_qc.depth())
+    # # exit()
+    # # service = QiskitRuntimeService(channel='ibm_quantum',token='8b7dbd957b8397e509a9b18af70f77a2853e7f9ef6a7cec345300e9e530f654061389b4ddfb86d9668cffe36379349f2d6c6d3a470609f927b423b66fac16254')
+    # sampler = Sampler(backend=aer_sim)
     # with Session(backend=aer_sim) as session:
     #     sampler = Sampler(session=session)
     #     result = sampler.run([isa_qc], shots=shots).result()
@@ -297,7 +303,7 @@ def calc_expval(phi):
         expval += post_select(counts, x_list) / shots
     expval /= math.pow(math.cos(phi[0]), 2)
     print(phi, expval)
-    # exit()
+    exit()
     return expval
 
 #The rest is basically for running the optimizer
@@ -305,7 +311,7 @@ def calc_expval(phi):
 init = [np.pi / 2]  * (2 ** N_M - 1)
 init.insert(0, 3 * np.pi / 4, ) #Initial parameters
 # init = [3.36172813, 1.57079631, 1.57079679, 0.22012573]
-# init = [np.pi, np.pi / 2, np.pi / 2, 0]
+init = [np.pi, np.pi / 2, np.pi / 2, 0]
 # init = [np.pi, np.pi, 0, 0]
 bounds = [(-np.pi, np.pi)] * (2 ** N_M - 1)
 bounds.insert(0, ( np.pi / 2, 3 * np.pi / 2))
