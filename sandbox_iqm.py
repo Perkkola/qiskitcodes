@@ -84,8 +84,8 @@ def createU_k(circuit, data_arr):
     thetas = thetas.tolist()
 
     gray_qc = synth_cnot_phase_aam(cnots, thetas)
-    circuit.append(gray_qc.to_gate(), [x for x in range(1, QPU_len + 3) if x != 2])
-    circuit.barrier([x for x in range(QPU_len + 3)])
+    circuit.append(gray_qc.to_gate(), [x for x in range(QPU_len + 2) if x != 1])
+    circuit.barrier([x for x in range(QPU_len + 2)])
 
     # for i in range(len(data_arr)):
     #     bit_string = ("{:0{width}b}".format(i, width=QPU_len))[::-1]
@@ -150,8 +150,8 @@ def createU_m(circuit, phi_array):
     thetas = thetas.tolist()
 
     gray_qc = synth_cnot_phase_aam(cnots, thetas)
-    circuit.append(gray_qc.to_gate(), [x for x in range(2, N_M + 3)])
-    circuit.barrier([x for x in range(QPU_len + 3)])
+    circuit.append(gray_qc.to_gate(), [x for x in range(1, N_M + 2)])
+    circuit.barrier([x for x in range(QPU_len + 2)])
 
 #The measurement operator
 def create_x_index_list():
@@ -271,7 +271,7 @@ for index, element in enumerate(data):
 # for j in range(2 ** QPU_len):
 #     reversed_index = int(("{:0{width}b}".format(j, width=QPU_len))[::-1], 2)
 #     data[reversed_index] = data_copy[j]
-shots = 2 ** 22
+shots = 2 ** 16
 QPU_len = N_M + N_L
 epoch = 0
 iteration = 0
@@ -281,25 +281,38 @@ print(QPU_len)
 x_index_list = create_x_index_list()
 circuits = []
 ########################################## CIRCUIT
-for i in range(numBatches):
-    ar2 = AncillaRegister(1, 'amp')
-    ar = AncillaRegister(2, 'ancilla')
-    row_reg = QuantumRegister(N_L, 'l')
-    col_reg = QuantumRegister(N_M, 'm')
-    cr = ClassicalRegister(N_M + 2, 'cr')
+# for i in range(numBatches):
+#     ar = AncillaRegister(2, 'ancilla')
+#     row_reg = QuantumRegister(N_L, 'l')
+#     col_reg = QuantumRegister(N_M, 'm')
+#     cr = ClassicalRegister(N_M + 2, 'cr')
 
 
-    qc = QuantumCircuit(ar2, ar, col_reg, row_reg,  cr)
+#     qc = QuantumCircuit(ar, col_reg, row_reg,  cr)
 
-    estimated = np.copy(data[i])
+#     estimated = np.copy(data[i])
 
-    # qc.x(ar[0])
-    qc.h([x for x in range(QPU_len + 3)])
-    createU_k(qc, estimated)
-    qc.x([x for x in range(3, QPU_len + 3)])
-    qc.mcz()
-    qc.h(ar[0])
-    circuits.append(qc)
+#     qc.h([x for x in range(QPU_len + 2)])
+#     createU_k(qc, estimated)
+#     qc.h(ar[0])
+
+
+
+#     # qc.h(ar[0])
+#     # createU_k(qc, -estimated)
+#     # qc.h([x for x in range(QPU_len + 2) if x != 1])
+
+#     # qc.x([x for x in range(QPU_len + 2) if x != 1])
+#     # rz = RZGate(2 * np.pi)
+#     # mcrz = MCMT(rz, QPU_len, 1)
+#     # qc.append(mcrz, [9, 8, 7, 6, 5, 4, 3, 1, 0][::-1])
+#     # qc.x([x for x in range(QPU_len + 2) if x != 1])
+
+#     # qc.h([x for x in range(QPU_len + 2) if x != 1])
+#     # createU_k(qc, estimated)
+#     # qc.h(ar[0])
+
+#     circuits.append(qc)
 
 #Function for NM optimizer
 def run_circuit(phi, circ):
@@ -325,18 +338,62 @@ def run_circuit(phi, circ):
     # psi.initialize(estimated, [col_reg, row_reg])
     # psi.h(col_reg)
 
+    ar = AncillaRegister(2, 'ancilla')
+    row_reg = QuantumRegister(N_L, 'l')
+    col_reg = QuantumRegister(N_M, 'm')
+    cr = ClassicalRegister(N_M + 2, 'cr')
 
-    psi = circ.copy()
+
+    psi = QuantumCircuit(ar, col_reg, row_reg,  cr)
+
+    estimated = np.copy(circ)
+
+    psi.h([x for x in range(QPU_len + 2)])
+    createU_k(psi, estimated)
+    # psi.h(ar[0])
 
     anc_register = next(x._register for x in psi.qubits if x._register.name == 'ancilla')
     col_register = next(x._register for x in psi.qubits if x._register.name == 'm')
     cl_register = next(x._register for x in psi.clbits if x._register.name == 'cr')
 
     createU_m(psi, phi)
-    psi.h(anc_register[1])
+    # psi.h(anc_register[1])
     psi.barrier([x for x in range(QPU_len + 2)])
 
     psi.h(col_register)
+
+    psi.barrier([x for x in range(QPU_len + 2)])
+
+    psi.x(1)
+    psi.cz(0, 1)
+    psi.x(1)
+
+    psi.barrier([x for x in range(QPU_len + 2)])
+
+    psi.h(col_register)
+    psi.barrier([x for x in range(QPU_len + 2)])
+    # psi.h(anc_register[1])
+    createU_m(psi, -np.copy(phi))
+    # psi.h(ar[0])
+    createU_k(psi, -np.copy(estimated))
+    psi.h([x for x in range(QPU_len + 2)])
+
+    rz = RZGate(2 * np.pi)
+    mcrz = MCMT(rz, QPU_len + 1, 1)
+
+    psi.x([x for x in range(QPU_len + 2)])
+    psi.append(mcrz, [x for x in range(QPU_len + 2)])
+    psi.x([x for x in range(QPU_len + 2)])
+
+    psi.h([x for x in range(QPU_len + 2)])
+    createU_k(psi, estimated)
+    # psi.h(ar[0])
+    createU_m(psi, phi)
+    # psi.h(anc_register[1])
+    psi.barrier([x for x in range(QPU_len + 2)])
+    psi.h(col_register)
+
+
 
     psi.measure(anc_register[0], cl_register[0])
     psi.measure(anc_register[1], cl_register[1])
@@ -348,8 +405,8 @@ def run_circuit(phi, circ):
     # for i in range(N_M):
     #     psi.measure(col_reg[i], cr[i])
 
-    print(psi)
-    exit()
+    # print(psi)
+    # exit()
     # iqm_server_url = "https://cocos.resonance.meetiqm.com/deneb"
     # provider = IQMProvider(iqm_server_url)
     # psi = psi.decompose(reps=10)
@@ -391,7 +448,7 @@ def calc_expval(phi):
     global iteration
     expval = 1
 
-    counts = run_circuit(phi, circuits[iteration % numBatches])
+    counts = run_circuit(phi, data[iteration % numBatches])
     if iteration % numBatches == 0: 
         epoch += 1 
         print(f"Epoch: {epoch}")
