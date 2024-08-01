@@ -63,7 +63,7 @@ def create_phase_x_index_list(qubit_length):
     return x_index_list
 
 #This is the unitary for endocing the data in the binary encoded data approach. See paper for reference
-def createU_k(circuit, data_arr):
+def createU_k(circuit, data_arr, invert = False):
     cnots = [[1]]
     all_thetas = []
     for _ in range(QPU_len):
@@ -83,7 +83,7 @@ def createU_k(circuit, data_arr):
         thetas = np.array(thetas) + np.array(flipped_thetas)
     thetas = thetas.tolist()
 
-    gray_qc = synth_cnot_phase_aam(cnots, thetas)
+    gray_qc = synth_cnot_phase_aam(cnots, thetas).inverse() if invert else synth_cnot_phase_aam(cnots, thetas)
     circuit.append(gray_qc.to_gate(), [x for x in range(QPU_len + 2) if x != 1])
     circuit.barrier([x for x in range(QPU_len + 2)])
 
@@ -110,7 +110,7 @@ def createU_k(circuit, data_arr):
 
         
 #This is the unitary for regression coefficients.
-def createU_m(circuit, phi_array):
+def createU_m(circuit, phi_array, invert = False):
     global N_M
     # for i in range(len(phi_array)):
     #     bit_string = ("{:0{width}b}".format(i, width=N_M))[::-1]
@@ -149,7 +149,7 @@ def createU_m(circuit, phi_array):
     thetas *= -1
     thetas = thetas.tolist()
 
-    gray_qc = synth_cnot_phase_aam(cnots, thetas)
+    gray_qc = synth_cnot_phase_aam(cnots, thetas).inverse() if invert else  synth_cnot_phase_aam(cnots, thetas)
     circuit.append(gray_qc.to_gate(), [x for x in range(1, N_M + 2)])
     circuit.barrier([x for x in range(QPU_len + 2)])
 
@@ -349,15 +349,15 @@ def run_circuit(phi, circ):
     estimated = np.copy(circ)
 
     psi.h([x for x in range(QPU_len + 2)])
-    createU_k(psi, estimated)
-    # psi.h(ar[0])
+    createU_k(psi, np.copy(estimated))
+    psi.h(ar[0])
 
     anc_register = next(x._register for x in psi.qubits if x._register.name == 'ancilla')
     col_register = next(x._register for x in psi.qubits if x._register.name == 'm')
     cl_register = next(x._register for x in psi.clbits if x._register.name == 'cr')
 
-    createU_m(psi, phi)
-    # psi.h(anc_register[1])
+    createU_m(psi, np.copy(phi))
+    psi.h(anc_register[1])
     psi.barrier([x for x in range(QPU_len + 2)])
 
     psi.h(col_register)
@@ -365,17 +365,18 @@ def run_circuit(phi, circ):
     psi.barrier([x for x in range(QPU_len + 2)])
 
     psi.x(1)
-    psi.cz(0, 1)
+    # psi.cz(1, 0)
+    psi.cx(1, 0)
     psi.x(1)
 
     psi.barrier([x for x in range(QPU_len + 2)])
 
     psi.h(col_register)
     psi.barrier([x for x in range(QPU_len + 2)])
-    # psi.h(anc_register[1])
-    createU_m(psi, -np.copy(phi))
-    # psi.h(ar[0])
-    createU_k(psi, -np.copy(estimated))
+    psi.h(anc_register[1])
+    createU_m(psi, np.copy(phi), invert=True)
+    psi.h(ar[0])
+    createU_k(psi, np.copy(estimated), invert=True)
     psi.h([x for x in range(QPU_len + 2)])
 
     rz = RZGate(2 * np.pi)
@@ -386,10 +387,10 @@ def run_circuit(phi, circ):
     psi.x([x for x in range(QPU_len + 2)])
 
     psi.h([x for x in range(QPU_len + 2)])
-    createU_k(psi, estimated)
-    # psi.h(ar[0])
-    createU_m(psi, phi)
-    # psi.h(anc_register[1])
+    createU_k(psi, np.copy(estimated))
+    psi.h(ar[0])
+    createU_m(psi, np.copy(phi))
+    psi.h(anc_register[1])
     psi.barrier([x for x in range(QPU_len + 2)])
     psi.h(col_register)
 
