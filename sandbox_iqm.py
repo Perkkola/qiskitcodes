@@ -10,7 +10,7 @@ from sklearn.model_selection import train_test_split
 
 from qiskit import QuantumCircuit, ClassicalRegister, QuantumRegister, AncillaRegister
 from qiskit.transpiler import PassManager, CouplingMap, TransformationPass
-from qiskit.circuit.library import RZGate, MCMT
+from qiskit.circuit.library import RZGate, MCMT, RXGate
 from qiskit.quantum_info.operators import Operator, Pauli, SparsePauliOp
 from qiskit.quantum_info import Statevector
 from qiskit.compiler import transpile
@@ -19,10 +19,12 @@ from scipy import optimize
 from qiskit.transpiler.preset_passmanagers import generate_preset_pass_manager
 from qiskit_ibm_runtime import Session, SamplerV2 as Sampler
 from gray_synth import synth_cnot_phase_aam
-# from iqm.qiskit_iqm import IQMProvider
+
+from pauliopt.pauli import synthesis# from iqm.qiskit_iqm import IQMProvider
 
 np.set_printoptions(threshold=sys.maxsize)
 
+# pauli_synth = synthesis.PauliSynthesizer()
 # from iqm.qiskit_iqm.fake_backends import fake_apollo, fake_adonis
 # from iqm.qiskit_iqm import IQMProvider, transpile_to_IQM
 # from iqm.qiskit_qim.fake_backends import fake_apollo
@@ -164,26 +166,62 @@ def create_x_index_list():
         x_index_list.append(indices)
     return x_index_list
 
+def extract_pauli_polynomial(data):
+    qubits = np.identity(QPU_len).tolist()
+    y_polynomial = []
+    z_polynomial = []
+
+    y_angles = []
+    z_angles = []
+    for inst in data:
+        inst_name = inst[0].name
+        if inst_name != 'cx':
+            qubit = inst[1][0]
+            qubit_index = qubit._index if qubit._register.name == 'm' else qubit._index + N_M
+
+            if inst_name == 'rz':
+                z_polynomial.append(qubits[qubit_index])
+                z_angles.append(inst[0].params[0])
+            elif inst_name == 'ry':
+                y_polynomial.append(qubits[qubit_index])
+                y_angles.append(inst[0].params[0])
+        else:
+            control = inst[1][0]
+            target = inst[1][1]
+
+            control_index = control._index if control._register.name == 'm' else control._index + N_M
+            target_index = target._index if target._register.name == 'm' else target._index + N_M
+
+            qubits[target_index] = list(map(lambda x: int(x == True), np.logical_xor(qubits[control_index], qubits[target_index])))
+
+            
+    print(np.array(y_polynomial).transpose())
+    print(np.array(y_angles))
+
+
+    print(np.array(z_polynomial).transpose())
+    print(np.array(z_angles))
+
 
 def cut_counts(counts, bit_indexes):
     bit_indexes.sort(reverse=True) 
     new_counts = {}
     discarded = 0
     for key in counts:
-        if(key[-1] == '1' and key[-2] == '0'):
+        # if(key[-1] == '1' and key[-2] == '0'):
         # if(key[-1] == '0'):
-            new_key = ''
-            for index in bit_indexes:
-                new_key += key[-3 - index]
-                # new_key += key[-1 - index]
-            if new_key in new_counts:
-                new_counts[new_key] += counts[key]
-            else:
-                new_counts[new_key] = counts[key]
+        new_key = ''
+        for index in bit_indexes:
+            new_key += key[-1 - index]
+            # new_key += key[-1 - index]
+        if new_key in new_counts:
+            new_counts[new_key] += counts[key]
         else:
-            discarded += counts[key]
+            new_counts[new_key] = counts[key]
+        # else:
+        #     discarded += counts[key]
     new_shots = shots - discarded
-    print(discarded)
+    # print(discarded)
     return new_counts, new_shots
 
 def post_select(counts, x_index_list):
@@ -209,23 +247,23 @@ class RemoveResets(TransformationPass):
 # provider=IQMProvider(url="https://cocos.resonance.meetiqm.com/garnet:mock")
 # backend = provider.get_backend()
 
-# X = np.array([[-0.32741112, -0.11288069,  0.49650164],
-#        [-0.94268847, -0.78149813, -0.49440176],
-#        [ 0.68523899,  0.61829019, -1.32935529],
-#        [-1.25647971, -0.14910498, -0.25044557],
-#        [ 1.66252391, -0.78480779,  1.79644309],
-#        [ 0.42989295,  0.45376306,  0.21658276],
-#        [-0.61965493, -0.39914738, -0.33494265],
-#        [-0.54552144,  1.85889336,  0.67628493]])
+X = np.array([[-0.32741112, -0.11288069,  0.49650164],
+       [-0.94268847, -0.78149813, -0.49440176],
+       [ 0.68523899,  0.61829019, -1.32935529],
+       [-1.25647971, -0.14910498, -0.25044557],
+       [ 1.66252391, -0.78480779,  1.79644309],
+       [ 0.42989295,  0.45376306,  0.21658276],
+       [-0.61965493, -0.39914738, -0.33494265],
+       [-0.54552144,  1.85889336,  0.67628493]])
 
-# y = np.array([ -8.02307406, -23.10019118,  16.79149797, -30.78951577,
-#         40.73946101,  10.53434892, -15.18438779, -13.3677773 ])
-df = pd.read_csv("./Admission_Predict.csv")
+y = np.array([ -8.02307406, -23.10019118,  16.79149797, -30.78951577,
+        40.73946101,  10.53434892, -15.18438779, -13.3677773 ])
+# df = pd.read_csv("./Admission_Predict.csv")
 
-X = np.array(df.iloc[:,1:-1])
-y = np.array(df.iloc[:,-1])
+# X = np.array(df.iloc[:,1:-1])
+# y = np.array(df.iloc[:,-1])
 
-X, X_test, y, y_test = train_test_split(X, y, test_size=0.36, random_state=42)
+# X, X_test, y, y_test = train_test_split(X, y, test_size=0.36, random_state=42)
 
 
 l = len(X) #Rows
@@ -235,7 +273,7 @@ data = np.empty((l, m))
 for i in range(l):
     data[i] = np.flip(np.append(X[i], y[i])) #Reverse the data order
 
-numBatches = 8 #Number of batches
+numBatches = 1 #Number of batches
 batchSize = int(np.ceil(l / numBatches))
 
 data = [data[i:i + batchSize] for i in range(0, len(data), batchSize)]
@@ -315,104 +353,41 @@ circuits = []
 #     circuits.append(qc)
 
 #Function for NM optimizer
-def run_circuit(phi, circ):
-    # row_reg = QuantumRegister(N_L, 'l')
-    # col_reg = QuantumRegister(N_M, 'm')
-    # cr = ClassicalRegister(N_M, 'cr')
-
-    # psi = QuantumCircuit(col_reg, row_reg,  cr)
-
-
-    # estimated = np.copy(batched_data)
-    # squareSum = 0
-
-    # for j in range(2 ** N_L):
-    #     for i in range(2 ** N_M):
-    #         estimated[j * 2 ** N_M + i] = estimated[j * 2 ** N_M + i] * math.cos(phi[i])
-    #         # estimated[j * 2 ** N_M + i] = estimated[j * 2 ** N_M + i]
-    #         squareSum += np.square(estimated[j * 2 ** N_M + i])
-
-    # squareSum = np.sqrt(squareSum)
-    # estimated = estimated / squareSum
-
-    # psi.initialize(estimated, [col_reg, row_reg])
-    # psi.h(col_reg)
-
-    ar = AncillaRegister(2, 'ancilla')
+def run_circuit(phi, batched_data):
     row_reg = QuantumRegister(N_L, 'l')
     col_reg = QuantumRegister(N_M, 'm')
-    cr = ClassicalRegister(N_M + 2, 'cr')
+    cr = ClassicalRegister(N_M, 'cr')
+
+    psi = QuantumCircuit(col_reg, row_reg,  cr)
 
 
-    psi = QuantumCircuit(ar, col_reg, row_reg,  cr)
+    estimated = np.copy(batched_data)
+    squareSum = 0
 
-    estimated = np.copy(circ)
+    for j in range(2 ** N_L):
+        for i in range(2 ** N_M):
+            estimated[j * 2 ** N_M + i] = estimated[j * 2 ** N_M + i] * math.cos(phi[i])
+            # estimated[j * 2 ** N_M + i] = estimated[j * 2 ** N_M + i]
+            squareSum += np.square(estimated[j * 2 ** N_M + i])
 
-    psi.h([x for x in range(QPU_len + 2)])
-    createU_k(psi, np.copy(estimated))
-    psi.h(ar[0])
+    squareSum = np.sqrt(squareSum)
+    estimated = estimated / squareSum
 
-    anc_register = next(x._register for x in psi.qubits if x._register.name == 'ancilla')
-    col_register = next(x._register for x in psi.qubits if x._register.name == 'm')
-    cl_register = next(x._register for x in psi.clbits if x._register.name == 'cr')
+    psi.initialize(estimated, [col_reg, row_reg])
+    psi.h(col_reg)
 
-    createU_m(psi, np.copy(phi))
-    psi.h(anc_register[1])
-    psi.barrier([x for x in range(QPU_len + 2)])
-
-    psi.h(col_register)
-
-    psi.barrier([x for x in range(QPU_len + 2)])
-
-    psi.x(1)
-    # psi.cz(1, 0)
-    psi.cx(1, 0)
-    psi.x(1)
-
-    psi.barrier([x for x in range(QPU_len + 2)])
-
-    psi.h(col_register)
-    psi.barrier([x for x in range(QPU_len + 2)])
-    psi.h(anc_register[1])
-    createU_m(psi, np.copy(phi), invert=True)
-    psi.h(ar[0])
-    createU_k(psi, np.copy(estimated), invert=True)
-    psi.h([x for x in range(QPU_len + 2)])
-
-    rz = RZGate(2 * np.pi)
-    mcrz = MCMT(rz, QPU_len + 1, 1)
-
-    psi.x([x for x in range(QPU_len + 2)])
-    psi.append(mcrz, [x for x in range(QPU_len + 2)])
-    psi.x([x for x in range(QPU_len + 2)])
-
-    psi.h([x for x in range(QPU_len + 2)])
-    createU_k(psi, np.copy(estimated))
-    psi.h(ar[0])
-    createU_m(psi, np.copy(phi))
-    psi.h(anc_register[1])
-    psi.barrier([x for x in range(QPU_len + 2)])
-    psi.h(col_register)
-
-
-
-    psi.measure(anc_register[0], cl_register[0])
-    psi.measure(anc_register[1], cl_register[1])
-    psi.barrier([x for x in range(QPU_len + 2)])
 
     for i in range(N_M):
-        psi.measure(col_register[i], cl_register[i + 2])
+        psi.measure(col_reg[i], cr[i])
 
     # for i in range(N_M):
     #     psi.measure(col_reg[i], cr[i])
 
-    # print(psi)
+    # print(psi.decompose())
     # exit()
     # iqm_server_url = "https://cocos.resonance.meetiqm.com/deneb"
     # provider = IQMProvider(iqm_server_url)
-    # psi = psi.decompose(reps=10)
-    # pm = PassManager([RemoveResets()]) 
-    # psi_no_resets = pm.run(psi)
+
 
     # # print(psi_no_resets.count_ops())
     # qc_transpiled = transpile(psi_no_resets, backend=backend, optimization_level=3)
@@ -426,7 +401,14 @@ def run_circuit(phi, circ):
     # # print(backend.error_profile)
     # return counts
 
+    psi = transpile(psi, basis_gates=['cx', 'h', 'x', 'ry', 'rz'], optimization_level=3)
 
+    pm = PassManager([RemoveResets()]) 
+    psi_no_resets = pm.run(psi)
+    print(psi_no_resets)
+    extract_pauli_polynomial(psi_no_resets.data)
+    # print(psi_no_resets)
+    exit()
 
     # print(psi_no_resets)
     aer_sim = AerSimulator()
